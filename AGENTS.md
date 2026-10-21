@@ -201,7 +201,10 @@ make release    # dist/linkscout-{linux-amd64,linux-arm64,darwin-arm64}
   Every filter value is also visible in the list (clicks = depth, plus size);
   a separate "this/other website" column was dropped as redundant with Art.
   The results list is not a table but two-line entries (`resultRow()`): the
-  URL on the first line, the values on the second; sorting is a "Sort by"
+  URL on the first line, the values on the second, in columns shared by all
+  entries (`#results-list` grid, each `.result` a subgrid – so values line
+  up; a missing value is an empty cell, not "–"; phones fall back to
+  wrapping); sorting is a "Sort by"
   select plus direction button (`SORT_KEYS`). Every filter has a label
   above it and "All"/"Alle" as first option; a set filter gets `.active`. Long URLs are cut at the *start* with an ellipsis
   (`urlCell()`: `direction: rtl` + LRM marks, `td.url { max-width: 0 }`);

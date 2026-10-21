@@ -190,30 +190,39 @@ details.advanced summary { cursor: pointer; color: var(--muted); font-weight: 60
   font-size: 13px; color: var(--muted);
 }
 .list-bar select { padding: 4px 8px; font-size: 13px; }
-.result { padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
+/* Every entry uses the same columns (subgrid of #results-list), so the
+   values of all URLs stand below each other. Columns: status, MIME type,
+   title (takes the rest), kind, clicks, size, time, SEO. */
+#results-list {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto auto auto auto;
+}
+.result {
+  grid-column: 1 / -1;
+  display: grid; grid-template-columns: subgrid;
+  column-gap: 14px; row-gap: 5px; align-items: center;
+  padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer;
+  font-size: 12px; color: var(--muted);
+}
 .result:last-child { border-bottom: 0; }
 .result:hover { background: var(--row-hover); }
+.r-url, .r-final { grid-column: 1 / -1; min-width: 0; }
 /* Long URLs are cut at the start, see urlCell() in app.js. */
 .result .u {
   display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   direction: rtl; text-align: left;
 }
-.r-url .u { font-size: 14px; }
+.r-url .u { font-size: 14px; color: var(--text); }
 .result a.u { color: var(--text); text-decoration: none; }
 .result a.u:hover { color: var(--accent); text-decoration: underline; }
-.r-final { color: var(--muted); font-size: 12px; margin-top: 1px; padding-left: 16px; position: relative; }
+.r-final { margin-top: -4px; padding-left: 16px; position: relative; }
 .r-final::before { content: "↳"; position: absolute; left: 0; }
 .r-final a.u { color: var(--muted); }
-.r-meta {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px;
-  margin-top: 5px; font-size: 12px; color: var(--muted); min-width: 0;
-}
-.r-type { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
-.r-title { color: var(--text); max-width: 340px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.r-title:empty { display: none; }
-.r-nums { margin-left: auto; display: flex; gap: 14px; align-items: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.r-nums > span { min-width: 64px; text-align: right; }
-.r-nums > span.r-seo { min-width: 26px; }
+.c-type { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; white-space: nowrap; }
+.c-title { color: var(--text); min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.c-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.c-seo { min-width: 24px; text-align: right; }
+
 .empty { padding: 30px; text-align: center; color: var(--muted); }
 
 .badge {
@@ -273,8 +282,11 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 0 24
   .tabs { order: 3; flex-basis: 100%; overflow-x: auto; }
   main { padding: 14px 16px 30px; }
   input[type="number"] { width: 100%; }
-  .r-nums { margin-left: 0; width: 100%; justify-content: space-between; }
-  .r-nums > span { min-width: 0; }
+  /* phones: no columns, the values wrap below the URL */
+  #results-list { display: block; }
+  .result { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+  .r-url, .r-final { flex-basis: 100%; }
+  .c-num:empty, .c-type:empty, .c-title:empty { display: none; }
   .filters select { max-width: none; }
   .filters label.filter { flex: 1 1 140px; }
   .filters label.filter select { width: 100%; }

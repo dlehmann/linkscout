@@ -11,7 +11,9 @@ section of a version as release notes.
 
 - Results list: two-line entries – the URL gets the full width of the first
   line, status, MIME type, title, kind, clicks, size, time and SEO issues
-  follow on the second line. Sorting moved to a "Sort by" selection
+  follow on the second line in columns that line up across all URLs (an
+  empty cell where a value is missing). Sorting moved to a "Sort by"
+  selection
 - Filters have labels, their first option is simply "All"; a filter that is
   set is highlighted
 

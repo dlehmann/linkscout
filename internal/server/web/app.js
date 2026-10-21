@@ -510,29 +510,28 @@
 
   /**
    * One entry of the results list: the URL (shortened at the start when it
-   * does not fit) on the first line, the redirect target below it, then
-   * status, MIME type, title and kind; clicks, size, time and SEO issues
-   * align right.
+   * does not fit) on the first line, the redirect target below it, then one
+   * cell per value. All entries share the same grid columns (CSS subgrid),
+   * so the values of different URLs stand exactly below each other; a
+   * missing value leaves its cell empty.
    */
   function resultRow(r) {
     const cls = statusClass(r);
     const status = r.pending ? "…" : r.status || "ERR";
-    const depth = (r.depth || 0) === NOT_LINKED ? t("stats.not_linked") : clickLabel(r.depth || 0);
+    const depth = r.pending ? "" : (r.depth || 0) === NOT_LINKED ? t("stats.not_linked") : clickLabel(r.depth || 0);
+    const size = !r.pending && r.size > 0 ? fmtBytes(r.size) : "";
+    const time = !r.pending && r.durationMs >= 0 && r.checkedAt && isSet(r.checkedAt) ? fmtMs(r.durationMs) : "";
     return `<div class="result" role="listitem" data-url="${esc(r.url)}">
       <div class="r-url">${urlCell(r.url)}</div>
       ${r.finalUrl ? `<div class="r-final">${urlCell(r.finalUrl, "final")}</div>` : ""}
-      <div class="r-meta">
-        <span class="badge s${cls}" title="${esc(errText(r.error))}">${status}</span>
-        <span class="r-type">${esc(typeOf(r) || "–")}</span>
-        <span class="r-title">${esc(r.title || errText(r.error) || "")}</span>
-        <span class="kind">${esc(t(`kind.${r.kind}`))}</span>
-        <span class="r-nums">
-          <span title="${esc(t("col.depth"))}">${esc(depth)}</span>
-          <span title="${esc(t("col.size"))}">${r.pending ? "" : fmtBytes(r.size)}</span>
-          <span title="${esc(t("col.time"))}">${r.pending ? "" : fmtMs(r.durationMs)}</span>
-          <span class="r-seo">${issueBadge(r)}</span>
-        </span>
-      </div>
+      <span class="c-status"><span class="badge s${cls}" title="${esc(errText(r.error))}">${status}</span></span>
+      <span class="c-type">${esc(typeOf(r))}</span>
+      <span class="c-title">${esc(r.title || errText(r.error) || "")}</span>
+      <span class="c-kind"><span class="kind">${esc(t(`kind.${r.kind}`))}</span></span>
+      <span class="c-num" title="${esc(t("col.depth"))}">${esc(depth)}</span>
+      <span class="c-num" title="${esc(t("col.size"))}">${size}</span>
+      <span class="c-num" title="${esc(t("col.time"))}">${time}</span>
+      <span class="c-seo">${issueBadge(r)}</span>
     </div>`;
   }
 
