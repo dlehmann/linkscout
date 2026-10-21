@@ -26,7 +26,7 @@
 
   // UI-only state; sort and filters survive a reload via localStorage.
   const ui = Object.assign(
-    { tab: "stats", sortKey: "", sortDesc: false, search: "", kind: "", status: "", type: "", depth: "", time: "", statsExternal: false },
+    { tab: "stats", sortKey: "", sortDesc: false, search: "", kind: "", status: "", type: "", depth: "", time: "", issue: "", statsExternal: false },
     load("linkscout.ui")
   );
   delete ui.drill; // left over from earlier versions
@@ -136,9 +136,9 @@
    * and the navigation in sync and render the tab.
    */
   function setTab(tab) {
-    if (!["results", "stats", "mirror"].includes(tab)) tab = "stats";
+    if (!["results", "stats", "seo", "mirror"].includes(tab)) tab = "stats";
     ui.tab = tab;
-    const navTab = tab === "stats" ? "results" : tab;
+    const navTab = tab === "mirror" ? "mirror" : "results"; // overview, results and SEO belong to "Check website"
     for (const b of $$(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === navTab));
     for (const b of $$(".subtabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === tab));
     for (const p of $$(".tab-panel")) p.classList.toggle("active", p.id === `tab-${tab}`);
@@ -170,6 +170,7 @@
     form.maxPages.value = cfg.maxPages ?? d.maxPages ?? 0;
     form.delayMs.value = cfg.delay ? Math.round(cfg.delay / 1e6) : d.delayMs || 0;
     form.checkExternal.checked = cfg.url ? !!cfg.checkExternal : d.checkExternal !== false;
+    form.sitemap.checked = cfg.url ? !!cfg.sitemap : true;
   }
 
   /** Fill the offline copy form with defaults and the remembered target template. */
@@ -222,6 +223,7 @@
       maxPages: +form.maxPages.value || 0,
       delayMs: +form.delayMs.value || 0,
       checkExternal: form.checkExternal.checked,
+      sitemap: form.sitemap.checked,
     };
   }
 
@@ -334,6 +336,7 @@
     renderProgress();
     if (ui.tab === "results") renderResults();
     if (ui.tab === "stats") renderStats();
+    if (ui.tab === "seo") renderSeo();
     if (ui.tab === "mirror") renderMirror();
   }
 
@@ -346,7 +349,8 @@
     $("#btn-recheck").disabled = running || !hasResults;
     $("#recheck-mode").disabled = running || !hasResults;
     $("#btn-stop").disabled = !running;
-    $("#btn-export").setAttribute("aria-disabled", String(!hasResults));
+    $("#export-menu").classList.toggle("disabled", !hasResults);
+    $("#btn-compare").setAttribute("aria-disabled", String(!hasResults || running));
 
     const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
     const fill = $("#progress-fill");
@@ -372,14 +376,20 @@
     sel.value = options.some(([v]) => v === current) ? current : "";
   }
 
-  /** Depth filter values are "0", "1", … or "10+" (everything from 10 on). */
+  /**
+   * Depth filter values are "0", "1", … , "10+" (everything from 10 on) and
+   * "-1" for URLs that are only listed in the sitemap (crawler.NotLinked).
+   */
   const MAX_DEPTH = 10;
+  const NOT_LINKED = -1;
   function depthMatches(r, v) {
     const d = r.depth || 0;
+    if (+v === NOT_LINKED) return d === NOT_LINKED;
     return v.endsWith("+") ? d >= parseInt(v, 10) : d === +v;
   }
-  /** "Start page", "1 click", "2 clicks", "10+ clicks". */
+  /** "Start page", "1 click", "2 clicks", "10+ clicks", "not linked". */
   function clickLabel(d) {
+    if (d === NOT_LINKED) return t("stats.not_linked");
     if (d === 0) return t("stats.start_page");
     return t(d === 1 ? "stats.one_click" : "stats.n_clicks", { n: d >= MAX_DEPTH ? `${MAX_DEPTH}+` : d });
   }
@@ -417,6 +427,7 @@
       if (ui.type && (typeOf(r) || UNKNOWN_TYPE) !== ui.type) return false;
       if (ui.status && !statusMatches(r, ui.status)) return false;
       if (ui.depth && !depthMatches(r, ui.depth)) return false;
+      if (ui.issue && !(ui.issue === "*" ? r.issues?.length : r.issues?.includes(ui.issue))) return false;
       if (ui.time && !timeMatches(r, ui.time)) return false;
       if (q && !`${r.url} ${r.finalUrl || ""} ${r.title || ""}`.toLowerCase().includes(q)) return false;
       return true;
@@ -428,8 +439,8 @@
     const k = ui.sortKey;
     if (!k) return rows;
     const dir = ui.sortDesc ? -1 : 1;
-    const num = k === "status" || k === "durationMs" || k === "depth" || k === "size";
-    const val = (r) => (k === "type" ? typeOf(r) : r[k]);
+    const num = k === "status" || k === "durationMs" || k === "depth" || k === "size" || k === "issues";
+    const val = (r) => (k === "type" ? typeOf(r) : k === "issues" ? issueWeight(r) : r[k]);
     return rows.slice().sort((a, b) => {
       let x = val(a), y = val(b);
       if (num) {
@@ -470,9 +481,12 @@
     if (all.some((r) => !typeOf(r))) mimeOptions.push([UNKNOWN_TYPE, t("stats.unknown_type")]);
     fillSelect($("#f-type"), t("filter.all_types"), mimeOptions, ui.type);
     fillSelect($("#f-time"), t("filter.all_times"), TIME_BUCKETS.map((_, i) => [String(i), timeLabel(i)]), ui.time);
-    const depths = [...new Set(all.map((r) => Math.min(r.depth || 0, MAX_DEPTH)))].sort((a, b) => a - b);
+    const depths = [...new Set(all.map((r) => Math.min(r.depth || 0, MAX_DEPTH)))].sort((a, b) => (a < 0) - (b < 0) || a - b);
     fillSelect($("#f-depth"), t("filter.all_depths"),
       depths.map((d) => [d >= MAX_DEPTH ? `${MAX_DEPTH}+` : String(d), clickLabel(d)]), ui.depth);
+    const issues = state.issues || [];
+    fillSelect($("#f-issue"), t("filter.all_issues"),
+      [...(issues.length ? [["*", t("filter.any_issue")]] : []), ...issues.map((i) => [i.id, t(`issue.${i.id}`)])], ui.issue);
     $("#f-search").value = ui.search;
 
     for (const th of $$("#results-table th")) {
@@ -493,9 +507,10 @@
         <td class="type">${esc(typeOf(r))}</td>
         <td class="title">${esc(r.title || errText(r.error))}</td>
         <td><span class="kind">${esc(t(`kind.${r.kind}`))}</span></td>
-        <td class="num">${r.depth || 0}</td>
+        <td class="num">${(r.depth || 0) === NOT_LINKED ? "–" : r.depth || 0}</td>
         <td class="num">${r.pending ? "" : fmtBytes(r.size)}</td>
         <td class="num">${r.pending ? "" : fmtMs(r.durationMs)}</td>
+        <td class="num">${issueBadge(r)}</td>
       </tr>`;
     }).join("");
   }
@@ -514,11 +529,11 @@
     });
   }
   $("#f-search").addEventListener("input", (e) => { ui.search = e.target.value; save("linkscout.ui", ui); renderResults(); });
-  for (const [id, key] of [["#f-kind", "kind"], ["#f-status", "status"], ["#f-type", "type"], ["#f-depth", "depth"], ["#f-time", "time"]]) {
+  for (const [id, key] of [["#f-kind", "kind"], ["#f-status", "status"], ["#f-type", "type"], ["#f-depth", "depth"], ["#f-time", "time"], ["#f-issue", "issue"]]) {
     $(id).addEventListener("change", (e) => { ui[key] = e.target.value; save("linkscout.ui", ui); renderResults(); });
   }
   $("#f-reset").addEventListener("click", () => {
-    Object.assign(ui, { search: "", kind: "", status: "", type: "", depth: "", time: "" });
+    Object.assign(ui, { search: "", kind: "", status: "", type: "", depth: "", time: "", issue: "" });
     save("linkscout.ui", ui);
     renderResults();
   });
@@ -534,6 +549,66 @@
   $("#detail").addEventListener("click", (e) => { if (e.target.id === "detail") $("#detail").close(); });
 
   /** Show all details of one result in the dialog. */
+  /** Severity of an issue id ("error", "warning", "notice"). */
+  function issueSeverity(id) {
+    return (state.issues || []).find((i) => i.id === id)?.severity || "notice";
+  }
+  /** Sort weight of a result's issues: errors count most. */
+  function issueWeight(r) {
+    return (r.issues || []).reduce((w, id) => w + ({ error: 100, warning: 10, notice: 1 }[issueSeverity(id)] || 1), 0);
+  }
+  /** Small badge with the number of SEO issues, coloured by the worst one. */
+  function issueBadge(r) {
+    const list = r.issues || [];
+    if (!list.length) return "";
+    const sev = ["error", "warning", "notice"].find((s) => list.some((id) => issueSeverity(id) === s));
+    const names = list.map((id) => t(`issue.${id}`)).join("\n");
+    return `<span class="sev-badge ${sev}" title="${esc(names)}">${list.length}</span>`;
+  }
+
+  /** Detail rows with the SEO data of an internal page. */
+  function seoRows(r, link) {
+    const p = r.seo;
+    const rows = [];
+    const order = { error: 0, warning: 1, notice: 2 };
+    if (r.issues?.length) {
+      const sortedIssues = [...r.issues].sort((a, b) => order[issueSeverity(a)] - order[issueSeverity(b)]);
+      rows.push([t("detail.seo"), `<ul class="issue-list">${sortedIssues.map((id) =>
+        `<li><span class="sev-dot ${issueSeverity(id)}"></span>${esc(t(`issue.${id}`))}</li>`).join("")}</ul>`]);
+    }
+    if (!p) return rows;
+    const list = (items) => `<ul>${items.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
+    const one = (items) => (items?.length > 1 ? list(items) : esc(items?.[0] || "–"));
+    if (p.titles?.length > 1) rows.push([t("detail.seo_title"), one(p.titles)]); // a single title is shown above
+    rows.push([t("detail.description"), one(p.descriptions)]);
+    if (p.robots?.length) rows.push([t("detail.robots"), one(p.robots)]);
+    rows.push([t("detail.canonical"), p.canonicals?.length ? p.canonicals.map(link).join("<br>") : "–"]);
+    rows.push([t("detail.h1"), one(p.h1)]);
+    rows.push([t("detail.lang"), esc(p.lang || "–")]);
+    if (p.hreflang?.length) rows.push([t("detail.hreflang"), `<ul>${p.hreflang.map((a) => `<li>${esc(a.lang)}: ${link(a.url)}</li>`).join("")}</ul>`]);
+    if (p.jsonld) rows.push([t("detail.jsonld"), `${p.jsonld}${p.jsonldErrors?.length ? " – " + esc(p.jsonldErrors.join("; ")) : ""}`]);
+    if (p.imagesNoAlt?.length) rows.push([t("detail.images_no_alt"), list(p.imagesNoAlt.slice(0, 20))]);
+    if (p.mixed?.length) rows.push([t("detail.mixed"), list(p.mixed.slice(0, 20))]);
+    const broken = brokenFragments(p);
+    if (broken.length) rows.push([t("detail.fragments_missing"), list(broken.slice(0, 20))]);
+    if (r.depth === 0 && p.securityMissing?.length) rows.push([t("detail.security"), list(p.securityMissing)]);
+    if (r.depth === 0 && isSet(p.certNotAfter)) rows.push([t("detail.cert"), esc(new Date(p.certNotAfter).toLocaleDateString(init.lang))]);
+    return rows;
+  }
+
+  /** The #fragment links of a page whose target element does not exist (same rule as crawler.fragmentFound). */
+  function brokenFragments(p) {
+    const byURL = new Map((state.results || []).map((x) => [x.url, x]));
+    return (p.fragments || []).filter((f) => {
+      const i = f.indexOf("#");
+      const target = byURL.get(f.slice(0, i));
+      let frag = f.slice(i + 1);
+      try { frag = decodeURIComponent(frag); } catch { /* keep as is */ }
+      if (!target?.seo || target.status !== 200 || !frag || frag.toLowerCase() === "top" || frag.startsWith(":~:")) return false;
+      return !(target.seo.ids || []).includes(frag);
+    });
+  }
+
   function openDetail(url) {
     const r = (state.results || []).find((x) => x.url === url);
     if (!r) return;
@@ -552,6 +627,10 @@
       [t("detail.depth"), r.depth],
       isSet(r.checkedAt) && [t("detail.checked_at"), new Date(r.checkedAt).toLocaleString(init.lang)],
       r.foundOn?.length && [t("detail.found_on"), `<ul>${r.foundOn.map((u) => `<li>${link(u)}</li>`).join("")}</ul>`],
+      r.internal && r.depth > 0 && [t("detail.inlinks"), r.foundOn?.length >= 50 ? "50+" : String(r.foundOn?.length || 0)],
+      r.inSitemap && [t("detail.in_sitemap"), esc(t("misc.yes"))],
+      r.robotsBlocked && [t("detail.robots_blocked"), esc(t("misc.yes"))],
+      ...seoRows(r, link),
     ].filter(Boolean);
     $("#detail-title").innerHTML = link(r.url);
     $("#detail-body").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("");
@@ -724,13 +803,17 @@
     }));
 
     // clicks from the start page; very deep links are folded into "10+"
-    const depthMax = Math.min(MAX_DEPTH, Math.max(0, ...rs.map((r) => r.depth || 0)));
+    const linked = rs.filter((r) => (r.depth || 0) !== NOT_LINKED);
+    const depthMax = Math.min(MAX_DEPTH, Math.max(0, ...linked.map((r) => r.depth || 0)));
     const depth = Array.from({ length: depthMax + 1 }, () => 0);
-    for (const r of rs) depth[Math.min(r.depth || 0, depthMax)]++;
+    for (const r of linked) depth[Math.min(r.depth || 0, depthMax)]++;
     const depthGroups = depth.map((n, d) => ({
       label: clickLabel(d), values: [n], tip: nURLs(n),
       drill: { depth: d >= MAX_DEPTH ? `${MAX_DEPTH}+` : String(d) },
     }));
+    // URLs only known from the sitemap get a column of their own at the end
+    const orphans = rs.length - linked.length;
+    if (orphans) depthGroups.push({ label: clickLabel(NOT_LINKED), values: [orphans], tip: nURLs(orphans), drill: { depth: String(NOT_LINKED) } });
 
     // size by type (Content-Length of the responses); every type is listed,
     // no "other" bucket, so the bars add up to the total size
@@ -797,20 +880,25 @@
   /** Open the results list with the criteria of a clicked statistic. */
   function drillDown(el) {
     const { sort, ...filters } = JSON.parse(el.dataset.drill);
-    Object.assign(ui, { search: "", kind: "", status: "", type: "", depth: "", time: "" }, filters);
+    Object.assign(ui, { search: "", kind: "", status: "", type: "", depth: "", time: "", issue: "" }, filters);
     if (sort) { ui.sortKey = sort; ui.sortDesc = true; }
     tip.hidden = true;
     setTab("results");
     window.scrollTo({ top: $("#subtabs").offsetTop - 70 });
   }
-  $("#stats-body").addEventListener("click", (e) => {
-    const el = e.target.closest("[data-drill]");
-    if (el) drillDown(el);
-  });
-  $("#stats-body").addEventListener("keydown", (e) => {
-    const el = e.target.closest("[data-drill]");
-    if (el && (e.key === "Enter" || e.key === " ") && el.tagName !== "BUTTON") { e.preventDefault(); drillDown(el); }
-  });
+  // Overview and SEO tab share the drill-down (and the tooltip, see below).
+  const drillAreas = [$("#stats-body"), $("#seo-body")];
+  for (const area of drillAreas) {
+    area.addEventListener("click", (e) => {
+      if (e.target.closest(".info")) return; // the "i" only explains
+      const el = e.target.closest("[data-drill]");
+      if (el) drillDown(el);
+    });
+    area.addEventListener("keydown", (e) => {
+      const el = e.target.closest("[data-drill]");
+      if (el && !e.target.closest(".info") && (e.key === "Enter" || e.key === " ") && el.tagName !== "BUTTON") { e.preventDefault(); drillDown(el); }
+    });
+  }
 
   $("#stats-body").addEventListener("change", (e) => {
     if (e.target.id !== "stats-external") return;
@@ -835,19 +923,107 @@
     tip.style.left = `${Math.min(window.innerWidth - w - 8, Math.max(8, x - w / 2))}px`;
     tip.style.top = `${y - h - 12 < 8 ? y + 16 : y - h - 12}px`;
   }
-  const statsBody = $("#stats-body");
-  statsBody.addEventListener("pointermove", (e) => {
-    const m = e.target.closest("[data-tip]");
-    if (m) showTip(m, e.clientX, e.clientY); else tip.hidden = true;
+  for (const area of drillAreas) {
+    area.addEventListener("pointermove", (e) => {
+      const m = e.target.closest("[data-tip]");
+      if (m) showTip(m, e.clientX, e.clientY); else tip.hidden = true;
+    });
+    area.addEventListener("pointerleave", () => { tip.hidden = true; });
+    area.addEventListener("focusin", (e) => {
+      const m = e.target.closest("[data-tip]");
+      if (!m) return;
+      const b = m.getBoundingClientRect();
+      showTip(m, b.left + b.width / 2, b.top);
+    });
+    area.addEventListener("focusout", () => { tip.hidden = true; });
+  }
+
+  // --- SEO ------------------------------------------------------------------
+
+  /**
+   * Render the SEO tab: every failed check (crawler.Analyze, state.issues)
+   * grouped by severity. A click on a check opens the results list filtered
+   * to the affected URLs.
+   */
+  function renderSeo() {
+    const el = $("#seo-body");
+    const results = state.results || [];
+    if (!results.some((r) => !r.pending)) {
+      el.innerHTML = `<div class="panel empty">${esc(t("stats.empty"))}</div>`;
+      return;
+    }
+    const issues = state.issues || [];
+    const analysed = results.filter((r) => r.seo).length;
+    const urls = (n) => (n === 1 ? t("seo.one_url") : t("seo.urls", { n: fmtNum(n) }));
+    const head = `<div class="panel seo-head"><p>${esc(t("seo.intro"))}</p>
+      <p class="muted">${esc(t("seo.pages_checked", { n: fmtNum(analysed) }))}</p></div>`;
+    if (!issues.length) {
+      el.innerHTML = head + `<div class="panel empty">${esc(t("seo.none"))}</div>`;
+      return;
+    }
+    const groups = ["error", "warning", "notice"].map((sev) => {
+      const items = issues.filter((i) => i.severity === sev);
+      if (!items.length) return "";
+      const rows = items.map((i) => `
+        <div class="seo-row" role="button" tabindex="0" data-drill="${esc(JSON.stringify({ issue: i.id }))}">
+          <span class="sev-dot ${sev}"></span>
+          <span class="name">${esc(t(`issue.${i.id}`))}</span>
+          ${info(t(`issue.${i.id}.help`))}
+          <span class="count">${esc(urls(i.count))}</span>
+        </div>`).join("");
+      // distinct URLs with at least one issue of this severity
+      const ids = new Set(items.map((i) => i.id));
+      const total = results.filter((r) => r.issues?.some((id) => ids.has(id))).length;
+      return `<div class="panel seo-group ${sev}"><h3><span class="sev-badge ${sev}">${fmtNum(items.length)}</span>${esc(t(`sev.${sev}`))}
+        <span class="muted">· ${esc(urls(total))}</span></h3>${rows}</div>`;
+    }).join("");
+    el.innerHTML = head + groups;
+  }
+
+  // --- compare --------------------------------------------------------------
+
+  $("#btn-compare input").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    showError("");
+    try {
+      const old = JSON.parse(await file.text());
+      renderCompare(await api("POST", "/api/compare", old));
+    } catch (err) {
+      showError(err.message);
+    }
   });
-  statsBody.addEventListener("pointerleave", () => { tip.hidden = true; });
-  statsBody.addEventListener("focusin", (e) => {
-    const m = e.target.closest("[data-tip]");
-    if (!m) return;
-    const b = m.getBoundingClientRect();
-    showTip(m, b.left + b.width / 2, b.top);
-  });
-  statsBody.addEventListener("focusout", () => { tip.hidden = true; });
+  $("#compare-close").addEventListener("click", () => $("#compare").close());
+  $("#compare").addEventListener("click", (e) => { if (e.target.id === "compare") $("#compare").close(); });
+
+  /** Show a crawler.Comparison in the compare dialog. */
+  function renderCompare(c) {
+    const MAX = 200; // long lists are cut, the counts stay exact
+    const link = (u) => `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(u)}</a>`;
+    const names = (ids) => ids.map((id) => esc(t(`issue.${id}`))).join(", ");
+    const status = (n) => (n ? String(n) : "ERR");
+    const section = (key, items, row) => (items?.length
+      ? `<h3>${esc(t(key))} <span class="muted">(${fmtNum(items.length)})</span></h3><ul class="list">${items.slice(0, MAX).map(row).join("")}</ul>`
+      : "");
+    const date = isSet(c.oldCreatedAt) ? new Date(c.oldCreatedAt).toLocaleString(init.lang) : "–";
+    const body = [
+      `<p>${esc(t("compare.summary", { date, added: fmtNum(c.added?.length), removed: fmtNum(c.removed?.length), status: fmtNum(c.status?.length) }))}</p>`,
+      section("compare.status", c.status, (x) => `<li>${link(x.url)}<div class="sub">${status(x.old)} → ${status(x.new)}</div></li>`),
+      section("compare.issues", c.newIssues, (x) => `<li>${link(x.url)}<div class="sub">${names(x.issues)}</div></li>`),
+      section("compare.fixed", c.fixedIssues, (x) => `<li>${link(x.url)}<div class="sub">${names(x.issues)}</div></li>`),
+      section("compare.added", c.added, (u) => `<li>${link(u)}</li>`),
+      section("compare.removed", c.removed, (u) => `<li>${link(u)}</li>`),
+    ].join("");
+    const empty = !(c.added?.length || c.removed?.length || c.status?.length || c.newIssues?.length || c.fixedIssues?.length);
+    $("#compare-body").innerHTML = body + (empty ? `<p class="muted">${esc(t("compare.none"))}</p>` : "");
+    $("#compare").showModal();
+  }
+
+  // The export menu closes after a choice and when clicking elsewhere.
+  const exportMenu = $("#export-menu");
+  exportMenu.addEventListener("click", (e) => { if (e.target.closest("a")) exportMenu.open = false; });
+  document.addEventListener("click", (e) => { if (!exportMenu.contains(e.target)) exportMenu.open = false; });
 
   // --- mirror ---------------------------------------------------------------
 

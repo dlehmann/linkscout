@@ -163,7 +163,7 @@ func TestReportToStdout(t *testing.T) {
 	r, w, _ := os.Pipe()
 	orig := os.Stdout
 	os.Stdout = w
-	err := writeReport("-", crawler.Report{StartURL: "https://e.com/"})
+	err := writeReport("-", crawler.Report{StartURL: "https://e.com/"}, i18n.EN)
 	w.Close()
 	os.Stdout = orig
 	if err != nil {
@@ -172,5 +172,30 @@ func TestReportToStdout(t *testing.T) {
 	var rep crawler.Report
 	if err := json.NewDecoder(r).Decode(&rep); err != nil || rep.StartURL != "https://e.com/" {
 		t.Errorf("stdout report: %+v %v", rep, err)
+	}
+}
+
+// -report picks the format by extension, -compare prints the changes.
+func TestReportFormatsAndCompare(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<title>Home</title>`)
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	jsonReport := filepath.Join(dir, "r.json")
+	if code := run([]string{"-report", jsonReport, srv.URL}); code != 0 {
+		t.Fatalf("json report: exit %d", code)
+	}
+	for _, name := range []string{"r.csv", "r.html"} {
+		out := filepath.Join(dir, name)
+		if code := run([]string{"-report", out, "-compare", jsonReport, srv.URL}); code != 0 {
+			t.Fatalf("%s: exit %d", name, code)
+		}
+		b, _ := os.ReadFile(out)
+		if strings.HasSuffix(name, ".csv") && !strings.HasPrefix(string(b), "url,") ||
+			strings.HasSuffix(name, ".html") && !strings.Contains(string(b), "<!doctype html>") {
+			t.Errorf("%s has the wrong format: %.40s", name, b)
+		}
 	}
 }

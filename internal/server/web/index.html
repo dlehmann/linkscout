@@ -52,6 +52,7 @@
             <label><span data-i18n="form.max_pages"></span><input type="number" name="maxPages" min="0"></label>
             <label><span data-i18n="form.delay"></span><input type="number" name="delayMs" min="0" step="50"></label>
             <label class="check"><input type="checkbox" name="checkExternal"> <span data-i18n="form.check_external"></span></label>
+            <label class="check"><input type="checkbox" name="sitemap"> <span data-i18n="form.sitemap"></span></label>
           </div>
           <div class="subhead" data-i18n="form.auth"></div>
           <div class="row">
@@ -69,7 +70,16 @@
           </div>
           <button type="button" id="btn-stop" class="danger" data-i18n="form.stop"></button>
           <span class="spacer"></span>
-          <a class="button" id="btn-export" href="/api/export" download data-i18n="form.export"></a>
+          <!-- export in three formats; JSON can be imported and compared again -->
+          <details class="menu" id="export-menu">
+            <summary class="button" data-i18n="form.export_menu"></summary>
+            <div class="menu-items">
+              <a href="/api/export?format=json" download data-i18n="form.export_json"></a>
+              <a href="/api/export?format=csv" download data-i18n="form.export_csv"></a>
+              <a href="/api/export?format=html" download data-i18n="form.export_html"></a>
+            </div>
+          </details>
+          <label class="button ghost" id="btn-compare"><span data-i18n="form.compare"></span><input type="file" accept="application/json,.json" hidden></label>
           <label class="button ghost" id="btn-import"><span data-i18n="form.import"></span><input type="file" accept="application/json,.json" hidden></label>
         </div>
       </form>
@@ -84,6 +94,7 @@
     <nav class="subtabs" id="subtabs" role="tablist">
       <button role="tab" data-tab="stats" data-i18n="tab.stats"></button>
       <button role="tab" data-tab="results" data-i18n="tab.list"></button>
+      <button role="tab" data-tab="seo" data-i18n="tab.seo"></button>
     </nav>
 
     <!-- Results -->
@@ -95,6 +106,7 @@
         <select id="f-type"></select>
         <select id="f-depth"></select>
         <select id="f-time"></select>
+        <select id="f-issue"></select>
         <button type="button" class="ghost small" id="f-reset" data-i18n="filter.reset"></button>
         <span class="spacer"></span>
         <span class="muted" id="f-count"></span>
@@ -111,6 +123,7 @@
               <th data-sort="depth" class="num" data-i18n="col.depth" data-i18n-title="stats.chart_depth_sub"></th>
               <th data-sort="size" class="num" data-i18n="col.size"></th>
               <th data-sort="durationMs" class="num" data-i18n="col.time"></th>
+              <th data-sort="issues" class="num" data-i18n="col.seo"></th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -122,6 +135,11 @@
     <!-- Statistics -->
     <section class="tab-panel" id="tab-stats">
       <div id="stats-body"></div>
+    </section>
+
+    <!-- SEO issues (rendered by renderSeo) -->
+    <section class="tab-panel" id="tab-seo">
+      <div id="seo-body"></div>
     </section>
 
     <!-- Offline copy -->
@@ -200,6 +218,15 @@
       <button class="icon-btn" id="detail-close" data-i18n-title="detail.close" aria-label="close">✕</button>
     </div>
     <dl id="detail-body"></dl>
+  </dialog>
+
+  <!-- result of "Compare …" (crawler.Comparison) -->
+  <dialog id="compare">
+    <div class="detail-head">
+      <h2 data-i18n="compare.title"></h2>
+      <button class="icon-btn" id="compare-close" data-i18n-title="detail.close" aria-label="close">✕</button>
+    </div>
+    <div id="compare-body"></div>
   </dialog>
 
   <script src="/static/app.js"></script>

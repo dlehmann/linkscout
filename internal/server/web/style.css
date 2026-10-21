@@ -368,3 +368,49 @@ button.kpi:hover, button.kpi:focus-visible { border-color: var(--accent); backgr
 .bars .bar-row:hover, .bars .bar-row:focus-visible { background: color-mix(in srgb, var(--accent) 12%, transparent); filter: none; }
 .bars .bar-row:hover .lbl, .bars .bar-row:focus-visible .lbl { color: var(--accent); }
 .bars .bar-row .lbl { word-break: break-all; }
+
+/* --- SEO tab -------------------------------------------------------------- */
+/* Severity colours reuse the status palette: error = red, warning = amber,
+   notice = blue. They always come with a text label (never colour alone). */
+.sev-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.sev-dot.error, .sev-badge.error { background: var(--bad); }
+.sev-dot.warning, .sev-badge.warning { background: var(--warn); }
+.sev-dot.notice, .sev-badge.notice { background: var(--info); }
+.sev-badge {
+  display: inline-block; min-width: 22px; padding: 0 7px; border-radius: 999px;
+  color: #fff; font-size: 12px; font-weight: 700; text-align: center; line-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.seo-head p { margin: 0 0 4px; }
+.seo-head p:last-child { margin: 0; }
+.seo-group h3 { display: flex; align-items: center; gap: 8px; }
+.seo-group h3 .muted { font-weight: 500; font-size: 13px; }
+.seo-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; margin: 0 -10px; border-radius: 8px; cursor: pointer; outline: none;
+}
+.seo-row + .seo-row { border-top: 1px solid var(--border); }
+.seo-row:hover, .seo-row:focus-visible { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.seo-row:hover .name, .seo-row:focus-visible .name { color: var(--accent); }
+.seo-row .name { font-weight: 600; }
+.seo-row .count { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.issue-list { list-style: none; padding: 0 !important; }
+.issue-list li { display: flex; align-items: center; gap: 8px; }
+
+/* --- export menu ---------------------------------------------------------- */
+details.menu { position: relative; }
+details.menu > summary { list-style: none; }
+details.menu > summary::-webkit-details-marker { display: none; }
+details.menu > summary::after { content: "▾"; font-size: 11px; margin-left: 2px; }
+details.menu.disabled > summary { opacity: .45; pointer-events: none; }
+details.menu .menu-items {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 10; min-width: 170px;
+  display: grid; padding: 4px; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--border); box-shadow: 0 6px 20px rgba(0, 0, 0, .18);
+}
+details.menu .menu-items a { padding: 7px 10px; border-radius: 6px; color: var(--text); text-decoration: none; font-weight: 500; }
+details.menu .menu-items a:hover { background: var(--surface-2); }
+
+/* --- compare dialog -------------------------------------------------------- */
+#compare h3 { font-size: 14px; margin: 18px 0 6px; }
+#compare .list { max-height: 260px; overflow: auto; }

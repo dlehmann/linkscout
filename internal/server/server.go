@@ -10,7 +10,8 @@
 //	GET  /api/state         progress, results, statistics, mirror progress
 //	POST /api/check         start a check {mode:"all"|"failed", url, referer, …}
 //	POST /api/stop          stop the running check
-//	GET  /api/export        download the JSON report
+//	GET  /api/export        download the report (?format=json|csv|html, default json)
+//	POST /api/compare       compare the results with an earlier JSON report (body)
 //	POST /api/import        load a JSON report (to re-check it later)
 //	POST /api/mirror        add an offline copy to the list and start it {url, outDir, external, …}
 //	POST /api/mirror/queue  add an offline copy to the list without starting it
@@ -124,6 +125,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/stop", s.handleStop)
 	mux.HandleFunc("GET /api/export", s.handleExport)
 	mux.HandleFunc("POST /api/import", s.handleImport)
+	mux.HandleFunc("POST /api/compare", s.handleCompare)
 	mux.HandleFunc("POST /api/mirror", s.handleMirror)
 	mux.HandleFunc("POST /api/mirror/queue", s.handleMirrorQueue)
 	mux.HandleFunc("POST /api/mirror/start", s.handleMirrorStart)
@@ -169,18 +171,21 @@ func isLoopbackHost(hostport string) bool {
 
 // State is the payload of GET /api/state and part of the initial page state.
 type State struct {
-	Progress crawler.Progress `json:"progress"`
-	Results  []crawler.Result `json:"results"`
-	Stats    crawler.Stats    `json:"stats"`
-	Mirrors  []JobView        `json:"mirrors"` // offline copy list
-	Config   crawler.Config   `json:"config"`
+	Progress crawler.Progress     `json:"progress"`
+	Results  []crawler.Result     `json:"results"`
+	Stats    crawler.Stats        `json:"stats"`
+	Issues   []crawler.IssueCount `json:"issues"`  // SEO issues of the results
+	Mirrors  []JobView            `json:"mirrors"` // offline copy list
+	Config   crawler.Config       `json:"config"`
 }
 
 // state collects the complete UI state.
 func (s *Server) state() State {
 	rs := s.crawler.Results()
 	cfg := s.crawler.Config()
+	issues := crawler.Analyze(rs)
 	return State{
+		Issues:   issues,
 		Progress: s.crawler.Progress(),
 		Results:  rs,
 		Stats:    crawler.Summarize(rs),
@@ -234,6 +239,7 @@ type CheckRequest struct {
 	MaxPages      int    `json:"maxPages"`
 	DelayMs       int    `json:"delayMs"`
 	CheckExternal *bool  `json:"checkExternal"`
+	Sitemap       *bool  `json:"sitemap"` // default true
 }
 
 // handleCheck starts a full check or re-checks the failed URLs.
@@ -249,6 +255,7 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 		MaxPages:      max(req.MaxPages, 0),
 		Delay:         time.Duration(max(req.DelayMs, 0)) * time.Millisecond,
 		CheckExternal: req.CheckExternal == nil || *req.CheckExternal,
+		Sitemap:       req.Sitemap == nil || *req.Sitemap,
 		Fetch:         s.fetchOptions(req.Referer, req.UserAgent, req.Username, req.Password),
 	}
 	var err error
@@ -312,12 +319,36 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 // handleExport downloads the current results as JSON report.
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	rep := crawler.NewReport(s.crawler, "LinkScout "+s.opts.Version)
-	name := "linkscout-report.json"
+	format := r.URL.Query().Get("format")
+	if format != "csv" && format != "html" {
+		format = "json"
+	}
+	name := "linkscout-report." + format
 	if u, err := url.Parse(rep.StartURL); err == nil && u.Host != "" {
-		name = fmt.Sprintf("linkscout-%s-%s.json", sanitizeName(u.Host), time.Now().Format("20060102-150405"))
+		name = fmt.Sprintf("linkscout-%s-%s.%s", sanitizeName(u.Host), time.Now().Format("20060102-150405"), format)
 	}
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
-	writeJSON(w, http.StatusOK, rep)
+	switch format {
+	case "csv":
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		crawler.WriteCSV(w, rep.Results)
+	case "html":
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		WriteHTMLReport(w, rep, s.opts.Lang)
+	default:
+		writeJSON(w, http.StatusOK, rep)
+	}
+}
+
+// handleCompare compares the current results with an earlier report sent
+// as body and answers with a crawler.Comparison.
+func (s *Server) handleCompare(w http.ResponseWriter, r *http.Request) {
+	var old crawler.Report
+	if err := decode(r, &old); err != nil {
+		s.fail(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, crawler.Compare(old, s.crawler.Results()))
 }
 
 // handleImport loads a JSON report so it can be viewed and re-checked.

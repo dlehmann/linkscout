@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LinkScout – website link checker and offline copies</title>
-  <meta name="description" content="LinkScout checks every link of a website – internal pages, external links and files – and saves complete offline copies of websites. A single binary for Linux and macOS with a local web interface.">
+  <title>LinkScout – website link checker, SEO audit and offline copies</title>
+  <meta name="description" content="LinkScout checks every link of a website – internal pages, external links and files –, runs 48 SEO checks and saves complete offline copies of websites. A single binary for Linux and macOS with a local web interface.">
   <link rel="canonical" href="https://dlehmann.github.io/linkscout/">
   <link rel="icon" href="linkscout.svg" type="image/svg+xml">
   <meta property="og:title" content="LinkScout">
-  <meta property="og:description" content="Check every link of a website and save it for offline use. Single binary, local web UI.">
+  <meta property="og:description" content="Check every link of a website, find SEO problems and save websites for offline use. Single binary, local web UI.">
   <meta property="og:image" content="https://dlehmann.github.io/linkscout/screenshots/overview-light.webp">
   <!--
     Project page of LinkScout. Plain HTML and CSS without scripts, fonts or
@@ -86,6 +86,7 @@
       <span class="name">LinkScout</span>
       <nav>
         <a href="#features">Features</a>
+        <a href="#seo">SEO</a>
         <a href="#offline">Offline copies</a>
         <a href="#install">Install</a>
         <a href="https://github.com/dlehmann/linkscout">GitHub</a>
@@ -94,7 +95,7 @@
 
     <div class="hero">
       <h1>Find every broken link<br>on your website.</h1>
-      <p class="lead">Enter the address of a website – LinkScout crawls all its pages and checks every internal page, external link, image, PDF and download. It can also save complete websites for offline use.</p>
+      <p class="lead">Enter the address of a website – LinkScout crawls all its pages, checks every internal page, external link, image, PDF and download, and runs 48 SEO checks. It can also save complete websites for offline use.</p>
       <div class="buttons">
         <a class="btn primary" href="#install">Download</a>
         <a class="btn" href="https://github.com/dlehmann/linkscout">Source on GitHub</a>
@@ -105,21 +106,23 @@
     <div class="shot">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="screenshots/overview-dark.webp">
-        <img src="screenshots/overview-light.webp" width="1280" height="1399" alt="LinkScout overview: key figures, status of all URLs, response times and clicks from the start page">
+        <img src="screenshots/overview-light.webp" width="1280" height="1460" alt="LinkScout overview: key figures, status of all URLs, response times and clicks from the start page">
       </picture>
     </div>
   </div>
 
   <section id="features">
     <div class="wrap">
-      <h2>Everything you need to know about your links</h2>
+      <h2>Everything you need to know about your website</h2>
       <p class="sub">LinkScout behaves like a browser: it sends the same headers as Firefox, keeps cookies and follows the browser's referrer rules, so servers answer it the way they answer your visitors.</p>
       <div class="grid">
         <div class="card"><h3>One input</h3><p>Only the start URL is needed. LinkScout finds all internal pages by itself and checks each URL exactly once.</p></div>
         <div class="card"><h3>All kinds of links</h3><p>Internal pages, links to other websites (including where redirects end up) and files: images, PDFs, CSS, JavaScript, fonts, videos.</p></div>
         <div class="card"><h3>Overview with charts</h3><p>Status of all URLs, response times, clicks from the start page, status codes and size by MIME type. Click any figure to see the matching URLs.</p></div>
-        <div class="card"><h3>Sortable, filterable list</h3><p>URL, status, MIME type, title, kind, clicks, size and time – filter by every value, open details with redirect chain and the pages that link to a URL.</p></div>
-        <div class="card"><h3>Re-check and export</h3><p>Export the results as JSON, import them later and re-check only the URLs that failed – or everything.</p></div>
+        <div class="card"><h3>Sortable, filterable list</h3><p>URL, status, MIME type, title, kind, clicks, size, time and SEO issues – filter by every value, open details with redirect chain, SEO data and the pages that link to a URL.</p></div>
+        <div class="card"><h3>Sitemap and robots.txt</h3><p>The URLs of your sitemap are checked too – pages that are listed there but linked nowhere show up as orphans. URLs blocked by robots.txt are marked.</p></div>
+        <div class="card"><h3>Compare runs</h3><p>Compare the results with an earlier report: new and removed URLs, changed status codes, new and fixed SEO issues.</p></div>
+        <div class="card"><h3>Export and re-check</h3><p>Export as JSON, CSV or a self-contained HTML report, import a report later and re-check only the URLs that failed – or everything.</p></div>
         <div class="card"><h3>Password protected sites</h3><p>HTTP Basic authentication is supported. Credentials are only sent to the checked site and never stored in reports.</p></div>
       </div>
     </div>
@@ -131,6 +134,28 @@
         <picture>
           <source media="(prefers-color-scheme: dark)" srcset="screenshots/results-dark.webp">
           <img src="screenshots/results-light.webp" width="1280" height="900" alt="Results list with filters for kind, status, MIME type, click depth and response time" loading="lazy">
+        </picture>
+      </div>
+    </div>
+  </section>
+
+  <section id="seo">
+    <div class="wrap split">
+      <div>
+        <h2>48 SEO checks</h2>
+        <p>Every internal page is analysed while it is checked – no extra requests, no account, nothing leaves your machine. The SEO tab groups the findings into errors, warnings and notices; a click shows the affected URLs.</p>
+        <ul>
+          <li><b>Indexability:</b> <code>noindex</code>, missing or broken canonicals, robots.txt, sitemap entries with errors or <code>noindex</code>, orphan pages.</li>
+          <li><b>Content:</b> missing, duplicate, too long or too short titles and meta descriptions, H1 and heading structure, duplicate content.</li>
+          <li><b>Links:</b> redirect chains and loops, internal links to redirects, broken <code>#anchors</code>, mixed content, deep and rarely linked pages.</li>
+          <li><b>Markup:</b> images without alt text or too large, hreflang, JSON-LD, viewport, <code>lang</code>, social media previews.</li>
+          <li><b>Site:</b> security headers, certificate expiry, URL hygiene.</li>
+        </ul>
+      </div>
+      <div class="shot">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="screenshots/seo-dark.webp">
+          <img src="screenshots/seo-light.webp" width="1280" height="1202" alt="SEO tab with the checks grouped into errors, warnings and notices" loading="lazy">
         </picture>
       </div>
     </div>
@@ -183,8 +208,10 @@ cd linkscout
 make install PREFIX=$HOME/.local   # binary, desktop launcher and icon</code></pre>
 
       <h3 class="step">Without the browser</h3>
-      <pre><code>linkscout -report report.json https://example.com     # check, write a JSON report
-linkscout -recheck report.json                         # re-check the failed URLs
+      <pre><code>linkscout -report report.json https://example.com      # check, write a JSON report
+linkscout -report report.html https://example.com      # … or a readable HTML report (also .csv)
+linkscout -recheck report.json                          # re-check the failed URLs
+linkscout -report new.json -compare report.json https://example.com  # what changed?
 linkscout -mirror ./example-offline https://example.com # offline copy</code></pre>
       <p>All releases with checksums: <a href="https://github.com/dlehmann/linkscout/releases">github.com/dlehmann/linkscout/releases</a></p>
     </div>

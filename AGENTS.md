@@ -72,7 +72,9 @@ make release    # dist/linkscout-{linux-amd64,linux-arm64,darwin-arm64}
   without version so `releases/latest/download/...` links stay valid;
   binary + README + LICENSE, Linux also `packaging/`), `SHA256SUMS`, a smoke
   test of the macOS binary on a macOS runner, then `gh release create` with
-  generated notes. Only tags matching `v<major>.<minor>.<patch>` trigger it.
+  the section of the version in `CHANGELOG.md` as notes (generated notes
+  when it is missing) – add the section before tagging. Only tags matching
+  `v<major>.<minor>.<patch>` trigger it.
 - The project page is served by GitHub Pages from `docs/` on `main`
   (`docs/.nojekyll`: plain files, no Jekyll). It is English; the link to
   „Impressum & Datenschutz“ and that page are German. No external resources
@@ -164,13 +166,14 @@ make release    # dist/linkscout-{linux-amd64,linux-arm64,darwin-arm64}
   `index.html` (placeholder `/*__INITIAL_STATE__*/null`, JSON escaped by
   `json.Marshal` so `</script>` cannot break out). The page polls
   `/api/state` while a job runs. Tabs are addressed by URL hash (`#results`,
-  `#stats`, `#mirror`) – do not give DOM elements these ids, the browser would
-  scroll to them. The nav shows only "Links prüfen"/"Check links" (`#results`) and
-  "Offline speichern"/"Save offline" (`#mirror`); inside the link checker the statistics
-  ("Übersicht"/"Overview", `#stats`, first) and the results list (`#results`)
-  are sub-tabs (`.subtabs`); the overview is always enabled (it shows a hint
-  until there are results), is the default on a fresh start (no hash) and is
-  what the "Links prüfen" nav button opens. German UI texts say
+  `#stats`, `#seo`, `#mirror`) – do not give DOM elements these ids, the
+  browser would scroll to them. The nav shows only "Website prüfen"/"Check
+  website" (`#results`) and "Offline speichern"/"Save offline" (`#mirror`);
+  inside the checker the sub-tabs (`.subtabs`) are the statistics
+  ("Übersicht"/"Overview", `#stats`, first), the results list (`#results`)
+  and the SEO checks (`#seo`). The overview is always enabled (it shows a
+  hint until there are results), is the default on a fresh start (no hash)
+  and is what the "Website prüfen" nav button opens. German UI texts say
   "Offline-Kopie" (not "Offline-Abbild").
 - **Statistics charts** are hand-written inline SVG in `app.js` (no chart
   library, keep it that way): a 100 % share bar of status classes, a response
@@ -223,12 +226,41 @@ probes `/api/state`) and no URL was given, the new process just opens the
 browser on the running instance and exits; otherwise it falls back to a free
 port. The user's own install is `make install PREFIX=$HOME/.local` (no sudo).
 
+## SEO checks
+
+- Facts are collected in the same HTML pass that extracts the links
+  (`links.Facts`: titles, descriptions, robots, canonicals, headings, images
+  without alt, hreflang, JSON-LD, OpenGraph/Twitter, lang, viewport, ids,
+  #fragment links) and stored per internal 200 HTML page without redirect in
+  `Result.SEO` (`crawler.PageSEO`, plus X-Robots-Tag / Link headers, mixed
+  content, content hash, missing security headers, certificate expiry).
+  A URL that redirects gets no facts – they belong to the target.
+- `crawler.Analyze` evaluates all checks and sets `Result.Issues`; it runs
+  on every state snapshot and in `NewReport` (O(n)), so imported reports are
+  analysed too. The catalogue is `crawler.Issues` (ID + severity, display
+  order); texts are `issue.<id>` and `issue.<id>.help` in the i18n tables (a
+  test enforces them for every language). Add a check = add it to `Issues`,
+  implement it in `Analyze`/`analyzeURL`, add both texts, add a test.
+- Duplicate checks (title, description, H1, content) only compare indexable
+  pages (no `noindex`, canonical = self). Security headers and certificate
+  are reported on the start page only (they are site-wide).
+- robots.txt (`crawler/robots.go`) is loaded before the crawl and only marks
+  URLs (`RobotsBlocked`); the crawl ignores it on purpose. With
+  `Config.Sitemap` the sitemap URLs (robots.txt `Sitemap:` or `/sitemap.xml`,
+  indexes and .gz followed, limits in robots.go) are added *after* the link
+  crawl; URLs not reached by links get `Depth = NotLinked (-1)` = orphans,
+  and so do the pages only linked from orphans.
+- `POST /api/compare` / `-compare` (`crawler.Compare`) and the CSV / HTML
+  exports (`crawler.WriteCSV`, `server.WriteHTMLReport`, `GET
+  /api/export?format=`) re-run Analyze, so they work with old reports too.
+
 ## JSON report format
 
 `crawler.Report`: `generator, startUrl, createdAt, userAgent, referer, stats,
-results[]` – each result is `crawler.Result` (see JSON tags). The same format
-is accepted by `POST /api/import` and `-recheck`, so keep it backwards
-compatible (only add fields).
+issues[], results[]` – each result is `crawler.Result` (see JSON tags; the SEO
+fields `inSitemap, robotsBlocked, seo, issues` are optional). The same format
+is accepted by `POST /api/import`, `POST /api/compare`, `-recheck` and
+`-compare`, so keep it backwards compatible (only add fields).
 
 ## Testing approach
 
@@ -238,11 +270,10 @@ host name → external). Server tests drive the real HTTP API.
 
 ## Ideas / not done yet
 
-- robots.txt support (currently ignored on purpose – it is the site owner's checker)
-- sitemap.xml as additional seed
 - per-host rate limiting (only a global delay exists)
-- link anchors (`#fragment`) are not validated
-- HTML report export (only JSON today)
-- persistent history / diff between two runs
+- persistent history of runs (comparing needs an exported report today)
 - `.deb` / AUR package (`PKGBUILD`) – README currently builds from source
 - Digest authentication and cookie/form based logins
+- SEO checks that would need a headless browser (JavaScript rendering) or
+  external services (Search Console, PageSpeed, backlinks) – deliberately left
+  out to keep the single binary and "nothing leaves your machine"

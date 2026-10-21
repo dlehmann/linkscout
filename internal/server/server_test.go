@@ -549,3 +549,85 @@ func TestHelpers(t *testing.T) {
 		t.Errorf("sanitizeName = %q", sanitizeName("www.example.com:8443/x"))
 	}
 }
+
+// Every SEO check needs a name and an explanation in every language.
+func TestIssueTranslations(t *testing.T) {
+	for _, l := range i18n.Supported {
+		m := i18n.Messages(l)
+		for _, d := range crawler.Issues {
+			for _, k := range []string{"issue." + d.ID, "issue." + d.ID + ".help"} {
+				if m[k] == "" || m[k] == k {
+					t.Errorf("%s: missing translation %q", l, k)
+				}
+			}
+		}
+		for _, sev := range []string{"sev.error", "sev.warning", "sev.notice"} {
+			if m[sev] == "" {
+				t.Errorf("%s: missing %q", l, sev)
+			}
+		}
+	}
+}
+
+// The state carries the SEO issues, the export offers JSON, CSV and HTML,
+// and an earlier report can be compared.
+func TestSEOExportAndCompare(t *testing.T) {
+	site := target(t)
+	s, ui := newUI(t, i18n.DE)
+	do(t, "POST", ui.URL+"/api/check", CheckRequest{URL: site.URL})
+	waitIdle(t, s)
+
+	_, body := do(t, "GET", ui.URL+"/api/state", nil)
+	var st State
+	json.Unmarshal(body, &st)
+	if len(st.Issues) == 0 {
+		t.Fatal("no SEO issues in the state")
+	}
+	withIssues := 0
+	for _, r := range st.Results {
+		if len(r.Issues) > 0 {
+			withIssues++
+		}
+	}
+	if withIssues == 0 {
+		t.Error("results carry no issues")
+	}
+
+	for format, want := range map[string]string{
+		"json": "application/json", "csv": "text/csv", "html": "text/html",
+	} {
+		resp, body := do(t, "GET", ui.URL+"/api/export?format="+format, nil)
+		if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), want) ||
+			!strings.Contains(resp.Header.Get("Content-Disposition"), "."+format+`"`) {
+			t.Errorf("%s export: %d %s %s", format, resp.StatusCode, resp.Header.Get("Content-Type"), resp.Header.Get("Content-Disposition"))
+		}
+		if format == "html" && (!strings.Contains(string(body), "LinkScout-Bericht") || strings.Contains(string(body), "<script")) {
+			t.Error("HTML report: wrong language or contains scripts")
+		}
+		if format == "csv" && !strings.HasPrefix(string(body), "url,final_url,status") {
+			t.Errorf("CSV header: %.60s", body)
+		}
+	}
+
+	_, report := do(t, "GET", ui.URL+"/api/export", nil)
+	var rep crawler.Report
+	json.Unmarshal(report, &rep)
+	rep.Results = rep.Results[1:] // the earlier report did not know the first URL yet
+	resp, body := do(t, "POST", ui.URL+"/api/compare", rep)
+	var cmp crawler.Comparison
+	if err := json.Unmarshal(body, &cmp); err != nil || resp.StatusCode != 200 || len(cmp.Added) != 1 {
+		t.Errorf("compare: %d %s", resp.StatusCode, body)
+	}
+}
+
+// Titles from the crawled site are escaped in the HTML report.
+func TestHTMLReportEscapes(t *testing.T) {
+	var buf bytes.Buffer
+	rep := crawler.Report{StartURL: "https://e.com/", Results: []crawler.Result{{URL: "https://e.com/", Status: 200, Title: `<script>alert(1)</script>`}}}
+	if err := WriteHTMLReport(&buf, rep, i18n.EN); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "<script>alert") {
+		t.Error("title not escaped")
+	}
+}

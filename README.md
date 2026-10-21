@@ -1,11 +1,13 @@
 # LinkScout
 
-**LinkScout checks every link of a website.** Enter the address of the start
-page; LinkScout crawls all internal pages and checks every URL it finds:
-internal pages, external links (including where redirects end up) and linked
-files such as PDFs, images or downloads. The results appear in a local web
-interface where you can explore, filter, export and re-check them. LinkScout
-can also save complete websites for offline use.
+**LinkScout checks every link of a website – and its SEO basics.** Enter the
+address of the start page; LinkScout crawls all internal pages and checks
+every URL it finds: internal pages, external links (including where redirects
+end up) and linked files such as PDFs, images or downloads. 48 SEO checks
+cover titles, descriptions, headings, canonicals, indexability, the sitemap,
+language versions and more. The results appear in a local web interface where
+you can explore, filter, compare, export and re-check them. LinkScout can also
+save complete websites for offline use.
 
 It is a single static binary for Linux and macOS. It needs no installation,
 runtime or database, and nothing leaves your machine except the requests to
@@ -24,6 +26,10 @@ the checked site.
 - Find **broken links** (404, 500, DNS or TLS errors, timeouts) before your visitors do
 - See which **external links redirect** and where they point now
 - Get an inventory of all **PDFs, images and other files** a site links to
+- Find **SEO problems**: missing or duplicate titles and descriptions,
+  `noindex` pages, broken canonicals, orphan pages from the sitemap, broken
+  anchors, images without alt text, hreflang mistakes and more
+- **Compare** two runs: what is new, what is gone, what broke, what got fixed
 - **Re-check** only the URLs that failed after fixing them, without crawling the whole site again
 - Archive websites or take them along **offline**
 - Run it in scripts or CI: a headless mode writes a JSON report and can fail the build
@@ -36,8 +42,20 @@ the checked site.
   clicks from the start page, status codes, MIME types and size by MIME type.
   External links can be included or left out (default: left out). Clicking a
   figure, bar or column opens the results list filtered to exactly those URLs
+- **SEO tab** with 48 checks, grouped into errors, warnings and notices –
+  indexability (`noindex`, canonicals, robots.txt), titles, meta descriptions
+  and headings (missing, duplicate, length), redirect chains and loops, links
+  to redirects, broken `#anchors`, mixed content, images (alt text, size),
+  sitemap (orphan pages, errors, `noindex`), click depth, hreflang, JSON-LD,
+  viewport, `lang`, social media previews, duplicate content, security
+  headers, certificate expiry and URL hygiene. A click shows the affected
+  URLs; the details of a result list its SEO data
+- **sitemap.xml and robots.txt:** after the link crawl the URLs of the
+  sitemap are checked too, pages only listed there appear as *not linked*.
+  URLs blocked by robots.txt are marked but still checked
 - **Results list** with URL, HTTP status, MIME type, title, kind (internal /
-  external / file), clicks from the start page, size and response time;
+  external / file), clicks from the start page, size, response time and SEO
+  issues;
   sortable, with full-text search and a filter for every column. Long URLs are
   shortened at the start, the full URL is in the tooltip. A click on a row
   shows details such as the redirect chain and the pages that link to the URL
@@ -49,8 +67,9 @@ the checked site.
   password under *Advanced settings*, or `-user`/`-password` on the command
   line. The credentials are only sent to the checked site, never to external
   links or CDNs, and the password never appears in exports
-- **JSON export** and import; **check again** only the URLs without status
-  200, or everything
+- **Export** as JSON, CSV or a self-contained HTML report; JSON import;
+  **check again** only the URLs without status 200, or everything;
+  **compare** with an earlier report
 - **Save offline:** downloads pages, images, CSS, JavaScript, fonts, videos
   and documents (also from CDNs), rewrites the links to relative paths and
   offers the copy as folder or ZIP. A **download list** takes several websites,
@@ -64,9 +83,13 @@ the checked site.
   languages can be added with a single file (see [AGENTS.md](AGENTS.md)).
   Light and dark theme follow the system and can be toggled
 
-| Results | Save offline |
+| SEO | Results |
 |---|---|
-| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/results-dark.webp"><img src="docs/screenshots/results-light.webp" alt="Results list with filters"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/mirror-dark.webp"><img src="docs/screenshots/mirror-light.webp" alt="Download list for offline copies"></picture> |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/seo-dark.webp"><img src="docs/screenshots/seo-light.webp" alt="SEO checks grouped by severity"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/results-dark.webp"><img src="docs/screenshots/results-light.webp" alt="Results list with filters"></picture> |
+
+| Save offline |
+|---|
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/mirror-dark.webp"><img src="docs/screenshots/mirror-light.webp" alt="Download list for offline copies"></picture> |
 
 ## Installation
 
@@ -148,8 +171,14 @@ Headless (no UI), for scripts and CI:
 # check and write a JSON report; exit code 3 if anything is broken
 linkscout -report report.json -fail-on-broken https://example.com
 
+# the same as CSV table or readable HTML report (format = file extension)
+linkscout -report report.html https://example.com
+
 # later: re-check only the URLs that were not 200 and update the report
 linkscout -recheck report.json
+
+# check again and compare with the earlier report
+linkscout -report new.json -compare report.json https://example.com
 
 # save an offline copy
 linkscout -mirror ./example-offline https://example.com
@@ -167,6 +196,8 @@ Useful options (`linkscout -help` lists all of them):
 | `-timeout 20s` | timeout per request (for offline copies: time without new data) |
 | `-user NAME` / `-password PW` | HTTP authentication for protected sites (also `https://user:pw@example.com` or env `LINKSCOUT_PASSWORD`) |
 | `-no-external` | do not check external links |
+| `-no-sitemap` | do not check the URLs listed in sitemap.xml |
+| `-compare FILE` | compare the results with an earlier JSON report |
 | `-mirror-external` | with `-mirror`: also download CDN resources |
 | `-listen ADDR` | address of the web UI (default `127.0.0.1:8088`) |
 | `-no-browser` | do not open the browser automatically |
@@ -182,14 +213,16 @@ make release  # static binaries for Linux (amd64, arm64) and macOS (arm64) in di
 ```
 
 Pushes and pull requests are checked by GitHub Actions on Linux and macOS.
-Pushing a version tag builds and publishes a release:
+Pushing a version tag builds and publishes a release (the release notes are
+the section of that version in [CHANGELOG.md](CHANGELOG.md)):
 
 ```bash
 git tag v1.2.3 && git push origin v1.2.3
 ```
 
-See [AGENTS.md](AGENTS.md) for the architecture, design decisions and notes
-for contributors.
+See [CHANGELOG.md](CHANGELOG.md) for the changes of every version and
+[AGENTS.md](AGENTS.md) for the architecture, design decisions and notes for
+contributors.
 
 ## License
 

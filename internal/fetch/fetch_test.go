@@ -353,3 +353,29 @@ func TestGetKeepsOverallTimeout(t *testing.T) {
 		t.Errorf("Get: err=%v after %v", r.Err, time.Since(start))
 	}
 }
+
+func TestRedirectLoopAndKeptHeaders(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/a", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/b", http.StatusFound) })
+	mux.HandleFunc("/b", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/a", http.StatusFound) })
+	mux.HandleFunc("/h", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Robots-Tag", "noindex")
+		w.Header().Set("X-Powered-By", "secret")
+		w.Header().Set("Content-Type", "text/html")
+	})
+	srv := httptest.NewTLSServer(mux)
+	defer srv.Close()
+	c := New(Options{})
+	c.hc.Transport = srv.Client().Transport // trust the test certificate
+	r := c.Get(context.Background(), srv.URL+"/a", "", false, 0)
+	if !errors.Is(r.Err, ErrRedirectLoop) {
+		t.Errorf("loop: err = %v", r.Err)
+	}
+	r = c.Get(context.Background(), srv.URL+"/h", "", false, 0)
+	if r.Header.Get("X-Robots-Tag") != "noindex" || r.Header.Get("X-Powered-By") != "" {
+		t.Errorf("kept headers = %v", r.Header)
+	}
+	if r.CertNotAfter.IsZero() {
+		t.Error("certificate expiry not recorded")
+	}
+}

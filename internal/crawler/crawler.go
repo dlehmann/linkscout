@@ -52,10 +52,42 @@ type Result struct {
 	MimeType    string    `json:"mimeType,omitempty"` // shown as type in the UI, see links.MimeType
 	Size        int64     `json:"size"`
 	DurationMs  int64     `json:"durationMs"`
-	Depth       int       `json:"depth"` // clicks from the start page
+	Depth       int       `json:"depth"` // clicks from the start page, -1 = only in the sitemap
 	FoundOn     []string  `json:"foundOn,omitempty"`
 	Pending     bool      `json:"pending,omitempty"`
 	CheckedAt   time.Time `json:"checkedAt,omitempty"`
+
+	// SEO data (all optional, so older reports stay valid).
+	InSitemap     bool     `json:"inSitemap,omitempty"`     // listed in sitemap.xml
+	RobotsBlocked bool     `json:"robotsBlocked,omitempty"` // disallowed by robots.txt
+	SEO           *PageSEO `json:"seo,omitempty"`           // facts of internal HTML pages
+	Issues        []string `json:"issues,omitempty"`        // IDs of the SEO checks that failed, see Analyze
+}
+
+// NotLinked is the depth of URLs that are only known from the sitemap.
+const NotLinked = -1
+
+// PageSEO holds what the SEO checks need from an internal HTML page.
+type PageSEO struct {
+	Titles       []string          `json:"titles,omitempty"`
+	Descriptions []string          `json:"descriptions,omitempty"`
+	Robots       []string          `json:"robots,omitempty"` // meta robots and X-Robots-Tag values
+	Canonicals   []string          `json:"canonicals,omitempty"`
+	H1           []string          `json:"h1,omitempty"`
+	Headings     []int             `json:"headings,omitempty"`
+	ImagesNoAlt  []string          `json:"imagesNoAlt,omitempty"`
+	Mixed        []string          `json:"mixed,omitempty"` // http:// resources on an https page
+	Hreflang     []links.Alternate `json:"hreflang,omitempty"`
+	JSONLD       int               `json:"jsonld,omitempty"`       // number of JSON-LD blocks
+	JSONLDErrors []string          `json:"jsonldErrors,omitempty"` // parse errors
+	Social       []string          `json:"social,omitempty"`       // og:* / twitter:* present
+	Lang         string            `json:"lang,omitempty"`
+	Viewport     bool              `json:"viewport,omitempty"`
+	IDs          []string          `json:"ids,omitempty"`             // fragment targets
+	Fragments    []string          `json:"fragments,omitempty"`       // links with #fragment
+	ContentHash  string            `json:"contentHash,omitempty"`     // SHA-1 of the HTML
+	Security     []string          `json:"securityMissing,omitempty"` // missing security headers
+	CertNotAfter time.Time         `json:"certNotAfter,omitempty"`
 }
 
 // OK reports whether the URL answered with status 200 (after redirects).
@@ -70,6 +102,7 @@ type Config struct {
 	MaxDepth      int           `json:"maxDepth"`      // link depth, 0 = unlimited
 	Delay         time.Duration `json:"delay"`         // pause before each request of a worker
 	CheckExternal bool          `json:"checkExternal"` // probe external URLs
+	Sitemap       bool          `json:"sitemap"`       // also check the URLs of sitemap.xml
 }
 
 // Progress is a snapshot of the crawler state.
@@ -103,6 +136,7 @@ type Crawler struct {
 	sem      chan struct{}
 	ctx      context.Context
 	visited  map[string]bool // URLs processed in the current run
+	robots   *Robots         // rules of the site's robots.txt (loaded by Start)
 }
 
 // New creates an idle crawler.
@@ -134,8 +168,18 @@ func (c *Crawler) Start(cfg Config) error {
 	c.client = fetch.New(cfg.Fetch)
 	c.results = map[string]*Result{}
 	c.order = nil
+	c.robots = nil
 	c.beginLocked("all")
-	c.enqueueLocked(norm, 0, "")
+	// robots.txt is loaded first (it marks the URLs), then the crawl begins.
+	c.wg.Add(1)
+	go func(ctx context.Context, client *fetch.Client) {
+		defer c.wg.Done()
+		robots := fetchRobots(ctx, client, start)
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.robots = robots
+		c.enqueueLocked(norm, 0, "")
+	}(c.ctx, c.client)
 	c.finishWhenIdle()
 	return nil
 }
@@ -194,11 +238,30 @@ func (c *Crawler) beginLocked(mode string) {
 	c.recountLocked()
 }
 
-// finishWhenIdle closes the run as soon as no job is outstanding.
+// finishWhenIdle closes the run as soon as no job is outstanding. A full
+// check first adds the sitemap URLs once the link crawl is idle.
 func (c *Crawler) finishWhenIdle() {
 	done := c.done
 	go func() {
 		c.wg.Wait()
+		c.mu.Lock()
+		sitemap := c.cfg.Sitemap && c.progress.Mode == "all" && c.ctx.Err() == nil
+		ctx, client, start, robots := c.ctx, c.client, c.start, c.robots
+		c.mu.Unlock()
+		if sitemap {
+			urls := fetchSitemapURLs(ctx, client, start, robots)
+			c.mu.Lock()
+			for _, u := range urls {
+				if r, ok := c.results[u]; ok {
+					r.InSitemap = true
+					continue
+				}
+				c.enqueueLocked(u, NotLinked, "")
+				c.results[u].InSitemap = true
+			}
+			c.mu.Unlock()
+			c.wg.Wait()
+		}
 		c.mu.Lock()
 		c.progress.Running = false
 		c.progress.FinishedAt = time.Now()
@@ -330,7 +393,7 @@ func (c *Crawler) enqueueLocked(u string, depth int, source string) {
 		if r.OK() && c.progress.Mode == "failed" {
 			return
 		}
-		if depth < r.Depth {
+		if depth >= 0 && (r.Depth < 0 || depth < r.Depth) {
 			r.Depth = depth
 		}
 		c.dispatchLocked(r)
@@ -347,12 +410,13 @@ func (c *Crawler) enqueueLocked(u string, depth int, source string) {
 		kind = KindInternal
 	}
 	r := &Result{
-		URL:      u,
-		Kind:     kind,
-		Internal: internal,
-		Type:     links.TypeOf(u, ""),
-		Category: cat,
-		Depth:    depth,
+		URL:           u,
+		Kind:          kind,
+		Internal:      internal,
+		Type:          links.TypeOf(u, ""),
+		Category:      cat,
+		Depth:         depth,
+		RobotsBlocked: internal && c.robots.Blocked(pu),
 	}
 	addFoundOn(r, source)
 	c.results[u] = r
@@ -407,6 +471,7 @@ func (c *Crawler) work(u string) {
 		source = r.FoundOn[0]
 	}
 	parse := r.Kind == KindInternal && (cfg.MaxDepth == 0 || r.Depth < cfg.MaxDepth)
+	start := c.start
 	c.mu.Unlock()
 
 	if !r.Internal && !cfg.CheckExternal {
@@ -440,6 +505,12 @@ func (c *Crawler) work(u string) {
 	isHTML := links.IsHTML(resp.ContentType) && resp.Status == 200
 	if isHTML && len(resp.Body) > 0 && finalURL != nil {
 		doc = links.ParseHTML(resp.Body, finalURL)
+	}
+	// A URL that redirects is not a page of its own: its facts belong to the
+	// target, which is checked as a URL of its own (see below).
+	var seo *PageSEO
+	if isHTML && r.Kind == KindInternal && len(resp.Redirects) == 0 && finalURL != nil && links.SameSite(start, finalURL) {
+		seo = pageSEO(doc, resp, finalURL)
 	}
 
 	c.mu.Lock()
@@ -475,6 +546,7 @@ func (c *Crawler) work(u string) {
 	if doc.Title != "" {
 		res.Title = doc.Title
 	}
+	res.SEO = seo
 	// An extension-less URL may turn out to be a file (e.g. /download?id=3).
 	if res.Kind != KindFile && links.IsFile(res.Category) && res.Category != links.CatData {
 		res.Kind = KindFile
@@ -494,8 +566,12 @@ func (c *Crawler) work(u string) {
 		return
 	}
 	c.pages++
+	childDepth := res.Depth + 1
+	if res.Depth == NotLinked { // links of an orphan page are not reachable from the start either
+		childDepth = NotLinked
+	}
 	for _, l := range doc.Links {
-		c.enqueueLocked(l.URL, res.Depth+1, u)
+		c.enqueueLocked(l.URL, childDepth, u)
 	}
 }
 

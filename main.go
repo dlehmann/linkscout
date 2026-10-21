@@ -13,6 +13,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -23,6 +24,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -57,10 +59,12 @@ type options struct {
 	delay        time.Duration
 	timeout      time.Duration
 	noExternal   bool
+	noSitemap    bool
 	report       string
 	recheck      string
 	recheckAll   bool
 	failOnBroken bool
+	compare      string
 	mirrorDir    string
 	mirrorExt    bool
 	lang         string
@@ -129,6 +133,7 @@ func run(args []string) int {
 		MaxDepth:      o.maxDepth,
 		Delay:         o.delay,
 		CheckExternal: !o.noExternal,
+		Sitemap:       !o.noSitemap,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -189,10 +194,12 @@ func parseFlags(args []string, lang i18n.Lang) (*options, *flag.FlagSet) {
 	fs.DurationVar(&o.delay, "delay", 0, T("flag.delay"))
 	fs.DurationVar(&o.timeout, "timeout", 20*time.Second, T("flag.timeout"))
 	fs.BoolVar(&o.noExternal, "no-external", false, T("flag.no_external"))
+	fs.BoolVar(&o.noSitemap, "no-sitemap", false, T("flag.no_sitemap"))
 	fs.StringVar(&o.report, "report", "", T("flag.report"))
 	fs.StringVar(&o.recheck, "recheck", "", T("flag.recheck"))
 	fs.BoolVar(&o.recheckAll, "recheck-all", false, T("flag.recheck_all"))
 	fs.BoolVar(&o.failOnBroken, "fail-on-broken", false, T("flag.fail_on_broken"))
+	fs.StringVar(&o.compare, "compare", "", T("flag.compare"))
 	fs.StringVar(&o.mirrorDir, "mirror", "", T("flag.mirror"))
 	fs.BoolVar(&o.mirrorExt, "mirror-external", false, T("flag.mirror_external"))
 	fs.StringVar(&o.lang, "lang", "", fmt.Sprintf(T("flag.lang"), i18n.Codes()))
@@ -372,11 +379,22 @@ func runHeadless(ctx context.Context, lang i18n.Lang, o *options, cfg crawler.Co
 	s := rep.Stats
 	fmt.Fprintf(os.Stderr, T("cli.summary")+"\n", s.Total, s.OK, s.Redirected, s.Broken, s.Errors)
 
+	if o.compare != "" {
+		old, err := readReport(o.compare)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		cmp := crawler.Compare(old, rep.Results)
+		fmt.Fprintf(os.Stderr, T("cli.compare_summary")+"\n", o.compare,
+			len(cmp.Added), len(cmp.Removed), len(cmp.Status), len(cmp.NewIssues))
+	}
+
 	out := o.report
 	if out == "" {
 		out = o.recheck // re-check without -report updates the file in place
 	}
-	if err := writeReport(out, rep); err != nil {
+	if err := writeReport(out, rep, lang); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
@@ -430,17 +448,32 @@ func readReport(path string) (crawler.Report, error) {
 	return rep, err
 }
 
-// writeReport writes rep as indented JSON to path, or to stdout for "-".
-func writeReport(path string, rep crawler.Report) error {
-	b, err := json.MarshalIndent(rep, "", "  ")
-	if err != nil {
-		return err
+// writeReport writes rep to path, or to stdout for "-". The format follows
+// the file extension: .csv (table), .html (readable report), otherwise JSON
+// (the format -recheck and the web UI can read again).
+func writeReport(path string, rep crawler.Report, lang i18n.Lang) error {
+	var buf bytes.Buffer
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".csv":
+		if err := crawler.WriteCSV(&buf, rep.Results); err != nil {
+			return err
+		}
+	case ".html", ".htm":
+		if err := server.WriteHTMLReport(&buf, rep, lang); err != nil {
+			return err
+		}
+	default:
+		b, err := json.MarshalIndent(rep, "", "  ")
+		if err != nil {
+			return err
+		}
+		buf.Write(append(b, '\n'))
 	}
 	if path == "-" {
-		_, err = os.Stdout.Write(append(b, '\n'))
+		_, err := os.Stdout.Write(buf.Bytes())
 		return err
 	}
-	return os.WriteFile(path, append(b, '\n'), 0o644)
+	return os.WriteFile(path, buf.Bytes(), 0o644)
 }
 
 // runMirror creates an offline copy without UI and prints a progress

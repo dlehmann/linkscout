@@ -81,6 +81,19 @@ type Response struct {
 	Size        int64         // Content-Length or number of body bytes read, -1 if unknown
 	Duration    time.Duration // wall clock time of the whole request
 	Err         error         // transport error (DNS, TLS, timeout, too many redirects …)
+	// Header holds the response headers that matter for the SEO checks
+	// (X-Robots-Tag, Link, security headers); see keptHeaders.
+	Header http.Header
+	// CertNotAfter is the expiry of the server certificate (HTTPS only).
+	CertNotAfter time.Time
+}
+
+// keptHeaders are copied into Response.Header. Everything else is dropped to
+// keep the results of large sites small.
+var keptHeaders = []string{
+	"X-Robots-Tag", "Link",
+	"Strict-Transport-Security", "Content-Security-Policy", "X-Content-Type-Options",
+	"X-Frame-Options", "Referrer-Policy", "Permissions-Policy",
 }
 
 // New creates a client with the given options.
@@ -110,6 +123,11 @@ func New(opts Options) *Client {
 			if len(via) >= c.opts.MaxRedirects {
 				return errTooManyRedirects
 			}
+			for _, v := range via {
+				if v.URL.String() == req.URL.String() {
+					return ErrRedirectLoop
+				}
+			}
 			// net/http replaces the Referer with the previous hop. Browsers
 			// keep the referer of the original navigation, so restore it and
 			// re-apply the policy for the new target URL.
@@ -138,6 +156,10 @@ func New(opts Options) *Client {
 
 // errTooManyRedirects is reported when a redirect chain exceeds MaxRedirects.
 var errTooManyRedirects = errors.New("too many redirects")
+
+// ErrRedirectLoop is reported when a redirect leads back to a URL of the
+// same chain (A → B → A).
+var ErrRedirectLoop = errors.New("redirect loop")
 
 // Options returns the effective options (defaults applied).
 func (c *Client) Options() Options { return c.opts }
@@ -274,6 +296,17 @@ func (c *Client) doWith(hc *http.Client, ctx context.Context, method, target, so
 	res.Redirects = redirectChain(resp)
 	res.ContentType = mediaType(resp.Header.Get("Content-Type"))
 	res.Size = resp.ContentLength
+	for _, k := range keptHeaders {
+		if v := resp.Header.Values(k); len(v) > 0 {
+			if res.Header == nil {
+				res.Header = http.Header{}
+			}
+			res.Header[k] = v
+		}
+	}
+	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
+		res.CertNotAfter = resp.TLS.PeerCertificates[0].NotAfter
+	}
 
 	if consume != nil {
 		n, err := consume(resp)

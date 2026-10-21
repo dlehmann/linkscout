@@ -135,19 +135,21 @@ func Summarize(rs []Result) Stats {
 
 // Report is the JSON export format (CLI -report and "Export JSON" in the UI).
 type Report struct {
-	Generator string    `json:"generator"`
-	StartURL  string    `json:"startUrl"`
-	CreatedAt time.Time `json:"createdAt"`
-	UserAgent string    `json:"userAgent"`
-	Referer   string    `json:"referer"` // empty = automatic (Firefox policy)
-	Stats     Stats     `json:"stats"`
-	Results   []Result  `json:"results"`
+	Generator string       `json:"generator"`
+	StartURL  string       `json:"startUrl"`
+	CreatedAt time.Time    `json:"createdAt"`
+	UserAgent string       `json:"userAgent"`
+	Referer   string       `json:"referer"` // empty = automatic (Firefox policy)
+	Stats     Stats        `json:"stats"`
+	Issues    []IssueCount `json:"issues,omitempty"` // SEO issues, see Analyze
+	Results   []Result     `json:"results"`
 }
 
 // NewReport builds a report from the current state of c.
 func NewReport(c *Crawler, generator string) Report {
 	cfg := c.Config()
 	rs := c.Results()
+	issues := Analyze(rs)
 	ua := cfg.Fetch.UserAgent
 	if ua == "" {
 		ua = fetch.FirefoxUA
@@ -159,6 +161,7 @@ func NewReport(c *Crawler, generator string) Report {
 		UserAgent: ua,
 		Referer:   cfg.Fetch.Referer,
 		Stats:     Summarize(rs),
+		Issues:    issues,
 		Results:   rs,
 	}
 }

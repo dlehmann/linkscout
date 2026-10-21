@@ -1,6 +1,7 @@
 package links
 
 import (
+	"fmt"
 	"net/url"
 	"reflect"
 	"strings"
@@ -305,5 +306,56 @@ func TestURLAttrsAndIsHTML(t *testing.T) {
 	}
 	if !IsHTML("text/html") || !IsHTML("application/xhtml+xml") || IsHTML("text/plain") || IsHTML("") {
 		t.Error("IsHTML")
+	}
+}
+
+func TestFacts(t *testing.T) {
+	base := mustURL(t, "https://e.com/dir/page")
+	doc := ParseHTML([]byte(`<html lang="de-AT"><head>
+		<title>One</title><meta name="description" content="  Desc  text "><meta name="ROBOTS" content="NoIndex, Follow">
+		<meta name="viewport" content="width=device-width"><meta property="og:title" content="x"><meta name="twitter:card" content="summary">
+		<meta property="og:image" content=""><link rel="canonical" href="/canon"><link rel="alternate" hreflang="en" href="/en/page">
+		<script type="application/ld+json">{"@type":"Thing"}</script></head><body>
+		<svg><title>icon</title></svg><h1>Main  title</h1><h3 id="sec">Sub</h3><a name="old"></a>
+		<img src="a.png"><img src="b.png" alt=""><a href="#sec">same page</a><a href="/other#x">other</a><a href="#">top</a>
+		</body></html>`), base)
+	f := doc.Facts
+	checks := []struct {
+		name      string
+		got, want any
+	}{
+		{"titles", f.Titles, []string{"One"}},
+		{"descriptions", f.Descriptions, []string{"Desc text"}},
+		{"robots", f.Robots, []string{"noindex, follow"}},
+		{"canonicals", f.Canonicals, []string{"https://e.com/canon"}},
+		{"h1", f.H1, []string{"Main title"}},
+		{"headings", f.Headings, []int{1, 3}},
+		{"imagesNoAlt", f.ImagesNoAlt, []string{"https://e.com/dir/a.png"}},
+		{"hreflang", f.Hreflang, []Alternate{{"en", "https://e.com/en/page"}}},
+		{"jsonld", len(f.JSONLD), 1},
+		{"social", f.Social, []string{"og:title", "twitter:card"}}, // empty og:image does not count
+		{"lang", f.Lang, "de-AT"},
+		{"viewport", f.Viewport, true},
+		{"ids", f.IDs, []string{"sec", "old"}},
+		{"fragments", f.Fragments, []string{"https://e.com/dir/page#sec", "https://e.com/other#x"}},
+	}
+	for _, c := range checks {
+		if !reflect.DeepEqual(c.got, c.want) {
+			t.Errorf("%s = %#v want %#v", c.name, c.got, c.want)
+		}
+	}
+	if doc.Title != "One" {
+		t.Errorf("an SVG <title> must not become the page title: %q", doc.Title)
+	}
+}
+
+func TestFactsLimits(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < maxIDs+50; i++ {
+		fmt.Fprintf(&b, `<p id="i%d"></p>`, i)
+	}
+	doc := ParseHTML([]byte(b.String()), mustURL(t, "https://e.com/"))
+	if len(doc.Facts.IDs) != maxIDs {
+		t.Errorf("IDs not capped: %d", len(doc.Facts.IDs))
 	}
 }

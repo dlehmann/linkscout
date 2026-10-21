@@ -98,7 +98,39 @@ type Document struct {
 	Title string
 	Base  *url.URL // effective base URL (honours <base href>)
 	Links []Link
+	Facts Facts // what the SEO checks need, collected in the same pass
 }
+
+// Facts are the SEO relevant properties of an HTML page.
+type Facts struct {
+	Titles       []string    // every <title> outside of SVG (normally exactly one)
+	Descriptions []string    // <meta name="description" content>
+	Robots       []string    // <meta name="robots|googlebot" content>
+	Canonicals   []string    // <link rel="canonical" href>, absolute
+	H1           []string    // text of every <h1>
+	Headings     []int       // levels of all h1–h6 in document order
+	ImagesNoAlt  []string    // <img> without alt attribute (absolute src)
+	Hreflang     []Alternate // <link rel="alternate" hreflang>
+	JSONLD       []string    // bodies of <script type="application/ld+json">
+	Social       []string    // og:title, og:image, twitter:card … that are present
+	Lang         string      // <html lang>
+	Viewport     bool        // <meta name="viewport"> present
+	IDs          []string    // id and <a name> values, the targets of #fragments
+	Fragments    []string    // links with a fragment: "absolute-url#fragment"
+}
+
+// Alternate is a language version announced with hreflang.
+type Alternate struct {
+	Lang string `json:"lang"`
+	URL  string `json:"url"`
+}
+
+// Limits per page so a huge generated page cannot blow up memory.
+const (
+	maxIDs       = 2000
+	maxFragments = 500
+	maxListItems = 200
+)
 
 // ParseHTML extracts the title and all http(s) links of an HTML document.
 // Links are de-duplicated by (URL, Embedded); the order of first appearance is
@@ -134,13 +166,19 @@ func ParseHTML(body []byte, pageURL *url.URL) Document {
 		doc.Links = append(doc.Links, Link{URL: abs, Raw: raw, Tag: tag, Embedded: embedded})
 	}
 
+	f := &doc.Facts
 	var walk func(n *html.Node)
 	walk = func(n *html.Node) {
 		if n.Type == html.ElementNode {
+			collectFacts(n, doc.Base, f)
 			switch n.DataAtom {
 			case atom.Title:
-				if doc.Title == "" && !insideSVG(n) {
-					doc.Title = collapseSpace(textOf(n))
+				if !insideSVG(n) {
+					t := collapseSpace(textOf(n))
+					if doc.Title == "" {
+						doc.Title = t
+					}
+					addCapped(&f.Titles, t, maxListItems)
 				}
 			case atom.Style:
 				for _, u := range CSSURLs(textOf(n)) {
@@ -182,6 +220,112 @@ func ParseHTML(body []byte, pageURL *url.URL) Document {
 	}
 	walk(root)
 	return doc
+}
+
+// addCapped appends v unless the list already holds max entries.
+func addCapped(list *[]string, v string, max int) {
+	if len(*list) < max {
+		*list = append(*list, v)
+	}
+}
+
+// socialProps are the OpenGraph / Twitter properties the checks look for.
+var socialProps = map[string]bool{
+	"og:title": true, "og:description": true, "og:image": true, "og:url": true, "og:type": true,
+	"twitter:card": true, "twitter:title": true, "twitter:image": true,
+}
+
+// collectFacts records the SEO relevant properties of element n.
+func collectFacts(n *html.Node, base *url.URL, f *Facts) {
+	if id := attrOr(n, "id"); id != "" {
+		addCapped(&f.IDs, id, maxIDs)
+	}
+	switch n.DataAtom {
+	case atom.Html:
+		f.Lang = strings.TrimSpace(attrOr(n, "lang"))
+	case atom.Meta:
+		name := strings.ToLower(strings.TrimSpace(attrOr(n, "name")))
+		content := strings.TrimSpace(attrOr(n, "content"))
+		switch name {
+		case "description":
+			addCapped(&f.Descriptions, collapseSpace(content), maxListItems)
+		case "robots", "googlebot":
+			addCapped(&f.Robots, strings.ToLower(content), maxListItems)
+		case "viewport":
+			f.Viewport = true
+		}
+		prop := strings.ToLower(strings.TrimSpace(attrOr(n, "property")))
+		for _, p := range []string{prop, name} {
+			if socialProps[p] && content != "" && !contains(f.Social, p) {
+				f.Social = append(f.Social, p)
+			}
+		}
+	case atom.Link:
+		rel := strings.Fields(strings.ToLower(attrOr(n, "rel")))
+		href := strings.TrimSpace(attrOr(n, "href"))
+		if contains(rel, "canonical") && href != "" {
+			if abs, ok := Normalize(href, base); ok {
+				addCapped(&f.Canonicals, abs, maxListItems)
+			} else {
+				addCapped(&f.Canonicals, href, maxListItems)
+			}
+		}
+		if lang, ok := attr(n, "hreflang"); ok && contains(rel, "alternate") && len(f.Hreflang) < maxListItems {
+			abs, ok := Normalize(href, base)
+			if !ok {
+				abs = href
+			}
+			f.Hreflang = append(f.Hreflang, Alternate{Lang: strings.TrimSpace(lang), URL: abs})
+		}
+	case atom.H1, atom.H2, atom.H3, atom.H4, atom.H5, atom.H6:
+		if insideSVG(n) {
+			return
+		}
+		level := int(n.Data[1] - '0')
+		if len(f.Headings) < maxIDs {
+			f.Headings = append(f.Headings, level)
+		}
+		if level == 1 {
+			addCapped(&f.H1, collapseSpace(textOf(n)), maxListItems)
+		}
+	case atom.Img:
+		if _, ok := attr(n, "alt"); !ok {
+			src := attrOr(n, "src")
+			if abs, ok := Normalize(src, base); ok {
+				src = abs
+			}
+			addCapped(&f.ImagesNoAlt, src, maxListItems)
+		}
+	case atom.Script:
+		if strings.EqualFold(strings.TrimSpace(attrOr(n, "type")), "application/ld+json") {
+			addCapped(&f.JSONLD, textOf(n), maxListItems)
+		}
+	case atom.A, atom.Area:
+		if n.DataAtom == atom.A {
+			if name := attrOr(n, "name"); name != "" {
+				addCapped(&f.IDs, name, maxIDs)
+			}
+		}
+		href := strings.TrimSpace(attrOr(n, "href"))
+		if i := strings.IndexByte(href, '#'); i >= 0 && i < len(href)-1 {
+			target := href[:i]
+			if target == "" { // "#section" points into the page itself
+				target = base.String()
+			}
+			if abs, ok := Normalize(target, base); ok {
+				addCapped(&f.Fragments, abs+href[i:], maxFragments)
+			}
+		}
+	}
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 // IsEmbedded decides whether an element/rel combination loads a resource
