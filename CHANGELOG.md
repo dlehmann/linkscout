@@ -5,6 +5,16 @@ All notable changes to LinkScout. The format follows
 [Semantic Versioning](https://semver.org/). The release workflow uses the
 section of a version as release notes.
 
+## [Unreleased]
+
+### Changed
+
+- Results list: two-line entries – the URL gets the full width of the first
+  line, status, MIME type, title, kind, clicks, size, time and SEO issues
+  follow on the second line. Sorting moved to a "Sort by" selection
+- Filters have labels, their first option is simply "All"; a filter that is
+  set is highlighted
+
 ## [1.1.0] - 2026-10-21
 
 ### Added
@@ -61,5 +71,6 @@ First public release.
 - English and German UI by system language
 - Static binaries for Linux (x86_64, arm64) and macOS (Apple Silicon)
 
+[Unreleased]: https://github.com/dlehmann/linkscout/compare/v1.1.0...HEAD
 [1.1.0]: https://github.com/dlehmann/linkscout/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/dlehmann/linkscout/releases/tag/v1.0.0

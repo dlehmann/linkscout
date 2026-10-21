@@ -99,35 +99,27 @@
 
     <!-- Results -->
     <section class="tab-panel" id="tab-results">
+      <!-- every filter has a label; its first option is "All" -->
       <div class="filters">
-        <input type="search" id="f-search" data-i18n-placeholder="filter.search">
-        <select id="f-kind"></select>
-        <select id="f-status"></select>
-        <select id="f-type"></select>
-        <select id="f-depth"></select>
-        <select id="f-time"></select>
-        <select id="f-issue"></select>
+        <label class="filter search"><span data-i18n="filter.label_search"></span><input type="search" id="f-search" data-i18n-placeholder="filter.search"></label>
+        <label class="filter"><span data-i18n="filter.label_kind"></span><select id="f-kind"></select></label>
+        <label class="filter"><span data-i18n="filter.label_status"></span><select id="f-status"></select></label>
+        <label class="filter"><span data-i18n="filter.label_type"></span><select id="f-type"></select></label>
+        <label class="filter"><span data-i18n="filter.label_depth"></span><select id="f-depth"></select></label>
+        <label class="filter"><span data-i18n="filter.label_time"></span><select id="f-time"></select></label>
+        <label class="filter"><span data-i18n="filter.label_issue"></span><select id="f-issue"></select></label>
         <button type="button" class="ghost small" id="f-reset" data-i18n="filter.reset"></button>
-        <span class="spacer"></span>
-        <span class="muted" id="f-count"></span>
       </div>
-      <div class="table-wrap">
-        <table id="results-table">
-          <thead>
-            <tr>
-              <th data-sort="url" data-i18n="col.url"></th>
-              <th data-sort="status" class="num" data-i18n="col.status"></th>
-              <th data-sort="type" data-i18n="col.type"></th>
-              <th data-sort="title" data-i18n="col.title"></th>
-              <th data-sort="kind" data-i18n="col.kind"></th>
-              <th data-sort="depth" class="num" data-i18n="col.depth" data-i18n-title="stats.chart_depth_sub"></th>
-              <th data-sort="size" class="num" data-i18n="col.size"></th>
-              <th data-sort="durationMs" class="num" data-i18n="col.time"></th>
-              <th data-sort="issues" class="num" data-i18n="col.seo"></th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+      <!-- two-line list: URL on the first line, the values on the second -->
+      <div class="list-wrap">
+        <div class="list-bar">
+          <span data-i18n="sort.by"></span>
+          <select id="sort-key" aria-label="sort"></select>
+          <button type="button" class="ghost small" id="sort-dir"></button>
+          <span class="spacer"></span>
+          <span class="muted" id="f-count"></span>
+        </div>
+        <div id="results-list" role="list"></div>
         <div class="empty" id="table-empty" data-i18n="table.empty" hidden></div>
       </div>
     </section>

@@ -163,45 +163,57 @@ details.advanced summary { cursor: pointer; color: var(--muted); font-weight: 60
 /* --- results ------------------------------------------------------------- */
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
-.filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
-.filters input[type="search"] { flex: 1 1 260px; }
+/* Filter bar: every select has a label above it, a set filter is
+   highlighted in the accent colour. */
+.filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 12px; }
+.filters label.filter { min-width: 0; }
+.filters label.search { flex: 1 1 220px; }
+.filters label.search input { width: 100%; }
+.filters select { max-width: 220px; }
+.filters select.active {
+  border-color: var(--accent); color: var(--accent); font-weight: 600;
+  background-color: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+.filters #f-reset { margin-bottom: 1px; }
 .muted { color: var(--muted); }
 
-.table-wrap {
+/* Two-line results list (see resultRow() in app.js). */
+.list-wrap {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  overflow: auto;
-  max-height: calc(100vh - 160px);
 }
-table { width: 100%; border-collapse: collapse; }
-th, td { padding: 7px 12px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
-th {
-  position: sticky; top: 0; z-index: 1;
-  background: var(--surface-2);
-  font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted);
-  cursor: pointer; user-select: none; white-space: nowrap;
+.list-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  font-size: 13px; color: var(--muted);
 }
-th:hover { color: var(--text); }
-th.sorted::after { content: " ▲"; color: var(--accent); }
-th.sorted.desc::after { content: " ▼"; }
-th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-tbody tr { cursor: pointer; }
-tbody tr:hover { background: var(--row-hover); }
-/* The URL column takes the remaining width (max-width: 0 lets it shrink);
-   long URLs are cut at the start, see urlCell() in app.js. */
-td.url { width: 45%; max-width: 0; min-width: 220px; }
-td.url .u {
+.list-bar select { padding: 4px 8px; font-size: 13px; }
+.result { padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.result:last-child { border-bottom: 0; }
+.result:hover { background: var(--row-hover); }
+/* Long URLs are cut at the start, see urlCell() in app.js. */
+.result .u {
   display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   direction: rtl; text-align: left;
 }
-td.url a.u { color: var(--text); text-decoration: none; }
-td.url a.u:hover { color: var(--accent); text-decoration: underline; }
-td.url .final, td.url a.final { color: var(--muted); font-size: 12px; margin-top: 2px; padding-left: 16px; position: relative; }
-td.url .final::before { content: "↳"; position: absolute; left: 0; direction: ltr; }
-td.title { color: var(--muted); min-width: 160px; }
-td.type { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: 12px; }
+.r-url .u { font-size: 14px; }
+.result a.u { color: var(--text); text-decoration: none; }
+.result a.u:hover { color: var(--accent); text-decoration: underline; }
+.r-final { color: var(--muted); font-size: 12px; margin-top: 1px; padding-left: 16px; position: relative; }
+.r-final::before { content: "↳"; position: absolute; left: 0; }
+.r-final a.u { color: var(--muted); }
+.r-meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px;
+  margin-top: 5px; font-size: 12px; color: var(--muted); min-width: 0;
+}
+.r-type { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
+.r-title { color: var(--text); max-width: 340px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.r-title:empty { display: none; }
+.r-nums { margin-left: auto; display: flex; gap: 14px; align-items: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.r-nums > span { min-width: 64px; text-align: right; }
+.r-nums > span.r-seo { min-width: 26px; }
 .empty { padding: 30px; text-align: center; color: var(--muted); }
 
 .badge {
@@ -261,7 +273,11 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 0 24
   .tabs { order: 3; flex-basis: 100%; overflow-x: auto; }
   main { padding: 14px 16px 30px; }
   input[type="number"] { width: 100%; }
-  td.url { min-width: 180px; }
+  .r-nums { margin-left: 0; width: 100%; justify-content: space-between; }
+  .r-nums > span { min-width: 0; }
+  .filters select { max-width: none; }
+  .filters label.filter { flex: 1 1 140px; }
+  .filters label.filter select { width: 100%; }
 }
 
 /* --- offline copy list --------------------------------------------------- */

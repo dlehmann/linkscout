@@ -198,8 +198,12 @@ make release    # dist/linkscout-{linux-amd64,linux-arm64,darwin-arm64}
   external links are left out of the statistics the drill sets
   `kind: "noext"` (all except external), so the list count equals the clicked
   number.
-  Every filter value is also a visible column (Klicks = depth, plus Größe);
-  a separate "this/other website" column was dropped as redundant with Art. Long URLs are cut at the *start* with an ellipsis
+  Every filter value is also visible in the list (clicks = depth, plus size);
+  a separate "this/other website" column was dropped as redundant with Art.
+  The results list is not a table but two-line entries (`resultRow()`): the
+  URL on the first line, the values on the second; sorting is a "Sort by"
+  select plus direction button (`SORT_KEYS`). Every filter has a label
+  above it and "All"/"Alle" as first option; a set filter gets `.active`. Long URLs are cut at the *start* with an ellipsis
   (`urlCell()`: `direction: rtl` + LRM marks, `td.url { max-width: 0 }`);
   the full URL is in the `title` tooltip. URLs in the list are links; every link to another
   origin opens in a new tab (`target=_blank`, `noopener noreferrer`, enforced

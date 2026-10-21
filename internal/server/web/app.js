@@ -469,65 +469,84 @@
   function renderResults() {
     const all = state.results || [];
     const types = [...new Set(all.map(typeOf).filter(Boolean))].sort();
-    fillSelect($("#f-kind"), t("filter.all_kinds"),
+    fillSelect($("#f-kind"), t("filter.all"),
       [...["internal", "external", "file"].map((k) => [k, t(`kind.${k}`)]), ["noint", t("filter.kind_noint")], ["noext", t("filter.kind_noext")]], ui.kind);
     const codes = [...new Set(all.map((r) => r.status).filter((c) => c > 0))].sort((a, b) => a - b);
-    fillSelect($("#f-status"), t("filter.all_status"), [
+    fillSelect($("#f-status"), t("filter.all"), [
       ["not200", t("status.not200")], ["broken", t("status.broken")], ["redirected", t("status.redirected")],
       ...["2xx", "3xx", "4xx", "5xx", "error", "pending"].map((c) => [c, t(`status.${c}`)]),
       ...codes.map((c) => [`c${c}`, t("status.code", { code: c })]),
     ], ui.status);
     const mimeOptions = types.map((x) => [x, x]);
     if (all.some((r) => !typeOf(r))) mimeOptions.push([UNKNOWN_TYPE, t("stats.unknown_type")]);
-    fillSelect($("#f-type"), t("filter.all_types"), mimeOptions, ui.type);
-    fillSelect($("#f-time"), t("filter.all_times"), TIME_BUCKETS.map((_, i) => [String(i), timeLabel(i)]), ui.time);
+    fillSelect($("#f-type"), t("filter.all"), mimeOptions, ui.type);
+    fillSelect($("#f-time"), t("filter.all"), TIME_BUCKETS.map((_, i) => [String(i), timeLabel(i)]), ui.time);
     const depths = [...new Set(all.map((r) => Math.min(r.depth || 0, MAX_DEPTH)))].sort((a, b) => (a < 0) - (b < 0) || a - b);
-    fillSelect($("#f-depth"), t("filter.all_depths"),
+    fillSelect($("#f-depth"), t("filter.all"),
       depths.map((d) => [d >= MAX_DEPTH ? `${MAX_DEPTH}+` : String(d), clickLabel(d)]), ui.depth);
     const issues = state.issues || [];
-    fillSelect($("#f-issue"), t("filter.all_issues"),
+    fillSelect($("#f-issue"), t("filter.all"),
       [...(issues.length ? [["*", t("filter.any_issue")]] : []), ...issues.map((i) => [i.id, t(`issue.${i.id}`)])], ui.issue);
     $("#f-search").value = ui.search;
 
-    for (const th of $$("#results-table th")) {
-      th.classList.toggle("sorted", th.dataset.sort === ui.sortKey);
-      th.classList.toggle("desc", th.dataset.sort === ui.sortKey && ui.sortDesc);
-    }
+    // a filter that is set is highlighted, so a restricted list is obvious
+    for (const sel of $$(".filters select")) sel.classList.toggle("active", sel.value !== "");
+    fillSelect($("#sort-key"), t("sort.none"), SORT_KEYS.map(([k, label]) => [k, t(label)]), ui.sortKey);
+    const dir = $("#sort-dir");
+    dir.hidden = !ui.sortKey;
+    dir.textContent = t(ui.sortDesc ? "sort.desc" : "sort.asc");
 
     const rows = sorted(filtered());
     $("#f-count").textContent = t("filter.count", { shown: fmtNum(rows.length), total: fmtNum(all.length) });
     $("#table-empty").hidden = rows.length > 0;
-    $("#results-table tbody").innerHTML = rows.slice(0, MAX_ROWS).map((r) => {
-      const cls = statusClass(r);
-      const status = r.pending ? "…" : r.status || "ERR";
-      const final = r.finalUrl ? urlCell(r.finalUrl, "final") : "";
-      return `<tr data-url="${esc(r.url)}">
-        <td class="url">${urlCell(r.url)}${final}</td>
-        <td class="num"><span class="badge s${cls}" title="${esc(errText(r.error))}">${status}</span></td>
-        <td class="type">${esc(typeOf(r))}</td>
-        <td class="title">${esc(r.title || errText(r.error))}</td>
-        <td><span class="kind">${esc(t(`kind.${r.kind}`))}</span></td>
-        <td class="num">${(r.depth || 0) === NOT_LINKED ? "–" : r.depth || 0}</td>
-        <td class="num">${r.pending ? "" : fmtBytes(r.size)}</td>
-        <td class="num">${r.pending ? "" : fmtMs(r.durationMs)}</td>
-        <td class="num">${issueBadge(r)}</td>
-      </tr>`;
-    }).join("");
+    $("#results-list").innerHTML = rows.slice(0, MAX_ROWS).map(resultRow).join("");
   }
 
-  for (const th of $$("#results-table th")) {
-    th.addEventListener("click", () => {
-      const k = th.dataset.sort;
-      if (ui.sortKey === k) {
-        if (ui.sortDesc) { ui.sortKey = ""; ui.sortDesc = false; } // third click: unsorted
-        else ui.sortDesc = true;
-      } else {
-        ui.sortKey = k; ui.sortDesc = false;
-      }
-      save("linkscout.ui", ui);
-      renderResults();
-    });
+  /** The columns the list can be sorted by (the second line of a row). */
+  const SORT_KEYS = [
+    ["url", "col.url"], ["status", "col.status"], ["type", "col.type"], ["title", "col.title"],
+    ["kind", "col.kind"], ["depth", "col.depth"], ["size", "col.size"], ["durationMs", "col.time"], ["issues", "col.seo"],
+  ];
+
+  /**
+   * One entry of the results list: the URL (shortened at the start when it
+   * does not fit) on the first line, the redirect target below it, then
+   * status, MIME type, title and kind; clicks, size, time and SEO issues
+   * align right.
+   */
+  function resultRow(r) {
+    const cls = statusClass(r);
+    const status = r.pending ? "…" : r.status || "ERR";
+    const depth = (r.depth || 0) === NOT_LINKED ? t("stats.not_linked") : clickLabel(r.depth || 0);
+    return `<div class="result" role="listitem" data-url="${esc(r.url)}">
+      <div class="r-url">${urlCell(r.url)}</div>
+      ${r.finalUrl ? `<div class="r-final">${urlCell(r.finalUrl, "final")}</div>` : ""}
+      <div class="r-meta">
+        <span class="badge s${cls}" title="${esc(errText(r.error))}">${status}</span>
+        <span class="r-type">${esc(typeOf(r) || "–")}</span>
+        <span class="r-title">${esc(r.title || errText(r.error) || "")}</span>
+        <span class="kind">${esc(t(`kind.${r.kind}`))}</span>
+        <span class="r-nums">
+          <span title="${esc(t("col.depth"))}">${esc(depth)}</span>
+          <span title="${esc(t("col.size"))}">${r.pending ? "" : fmtBytes(r.size)}</span>
+          <span title="${esc(t("col.time"))}">${r.pending ? "" : fmtMs(r.durationMs)}</span>
+          <span class="r-seo">${issueBadge(r)}</span>
+        </span>
+      </div>
+    </div>`;
   }
+
+  $("#sort-key").addEventListener("change", (e) => {
+    ui.sortKey = e.target.value;
+    ui.sortDesc = ["status", "size", "durationMs", "issues"].includes(ui.sortKey); // big numbers first
+    save("linkscout.ui", ui);
+    renderResults();
+  });
+  $("#sort-dir").addEventListener("click", () => {
+    ui.sortDesc = !ui.sortDesc;
+    save("linkscout.ui", ui);
+    renderResults();
+  });
   $("#f-search").addEventListener("input", (e) => { ui.search = e.target.value; save("linkscout.ui", ui); renderResults(); });
   for (const [id, key] of [["#f-kind", "kind"], ["#f-status", "status"], ["#f-type", "type"], ["#f-depth", "depth"], ["#f-time", "time"], ["#f-issue", "issue"]]) {
     $(id).addEventListener("change", (e) => { ui[key] = e.target.value; save("linkscout.ui", ui); renderResults(); });
@@ -540,9 +559,9 @@
 
   // --- detail dialog --------------------------------------------------------
 
-  $("#results-table tbody").addEventListener("click", (e) => {
+  $("#results-list").addEventListener("click", (e) => {
     if (e.target.closest("a")) return; // the link itself opens in a new tab
-    const tr = e.target.closest("tr");
+    const tr = e.target.closest(".result");
     if (tr) openDetail(tr.dataset.url);
   });
   $("#detail-close").addEventListener("click", () => $("#detail").close());
