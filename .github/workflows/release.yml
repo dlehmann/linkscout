@@ -68,15 +68,24 @@ jobs:
     permissions:
       contents: write # create the release
     steps:
+      - uses: actions/checkout@v4 # for CHANGELOG.md
       - uses: actions/download-artifact@v4
         with:
           name: release
           path: upload
+      - name: Release notes from CHANGELOG.md
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          # the lines between "## [<version>]" and the next "## [" heading
+          awk -v v="$v" 'index($0, "## [" v "]") == 1 {p = 1; next} p && /^## \[/ {exit} p' CHANGELOG.md > notes.md
+          cat notes.md
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # without a changelog section GitHub generates the notes
+          if [ -s notes.md ]; then notes=(--notes-file notes.md); else notes=(--generate-notes); fi
           gh release create "$GITHUB_REF_NAME" upload/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "LinkScout $GITHUB_REF_NAME" \
-            --generate-notes
+            "${notes[@]}"
