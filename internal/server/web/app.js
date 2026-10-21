@@ -511,7 +511,8 @@
   /**
    * One entry of the results list: the URL (shortened at the start when it
    * does not fit) on the first line, the redirect target below it, then one
-   * cell per value. All entries share the same grid columns (CSS subgrid),
+   * cell per value: status and title on the left, everything else on the
+   * right. All entries share the same grid columns (CSS subgrid),
    * so the values of different URLs stand exactly below each other; a
    * missing value leaves its cell empty.
    */
@@ -525,8 +526,8 @@
       <div class="r-url">${urlCell(r.url)}</div>
       ${r.finalUrl ? `<div class="r-final">${urlCell(r.finalUrl, "final")}</div>` : ""}
       <span class="c-status"><span class="badge s${cls}" title="${esc(errText(r.error))}">${status}</span></span>
-      <span class="c-type">${esc(typeOf(r))}</span>
       <span class="c-title">${esc(r.title || errText(r.error) || "")}</span>
+      <span class="c-type">${esc(typeOf(r))}</span>
       <span class="c-kind"><span class="kind">${esc(t(`kind.${r.kind}`))}</span></span>
       <span class="c-num" title="${esc(t("col.depth"))}">${esc(depth)}</span>
       <span class="c-num" title="${esc(t("col.size"))}">${size}</span>

@@ -191,11 +191,12 @@ details.advanced summary { cursor: pointer; color: var(--muted); font-weight: 60
 }
 .list-bar select { padding: 4px 8px; font-size: 13px; }
 /* Every entry uses the same columns (subgrid of #results-list), so the
-   values of all URLs stand below each other. Columns: status, MIME type,
-   title (takes the rest), kind, clicks, size, time, SEO. */
+   values of all URLs stand below each other. Columns: status, title (takes
+   the rest), MIME type, kind, clicks, size, time, SEO. Values with a number
+   (clicks, size, time) are right-aligned, text columns left-aligned. */
 #results-list {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto auto auto auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto auto auto auto;
 }
 .result {
   grid-column: 1 / -1;
