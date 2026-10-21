@@ -1,0 +1,4 @@
+/linkscout
+/dist/
+# local tool configuration (dev server ports, scratch paths)
+/.claude/

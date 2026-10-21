@@ -1,0 +1,82 @@
+# Publishes a release when a semantic version tag is pushed:
+#
+#   git tag v1.2.3 && git push origin v1.2.3
+#
+# The binaries are statically linked (CGO_ENABLED=0) and cross-compiled on
+# Linux for Linux x86_64, Linux arm64 and macOS Apple Silicon. The macOS
+# binary is then started once on a real Mac before anything is published.
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Checks
+        run: make vet race
+      - name: Build the release binaries
+        run: make release VERSION="${GITHUB_REF_NAME#v}"
+      - name: Package
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          mkdir -p upload
+          for bin in dist/linkscout-*; do
+            target="${bin#dist/linkscout-}"              # e.g. linux-amd64
+            dir="linkscout-$v-$target"
+            mkdir -p "$dir"
+            cp "$bin" "$dir/linkscout"
+            cp README.md LICENSE "$dir/"
+            # The desktop launcher and icon only make sense on Linux.
+            case "$target" in linux-*) cp -r packaging "$dir/";; esac
+            # Archive names without version, so the website can link to
+            # .../releases/latest/download/linkscout-linux-amd64.tar.gz
+            tar -czf "upload/linkscout-$target.tar.gz" "$dir"
+          done
+          cd upload && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: upload/
+          retention-days: 3
+
+  # The macOS binary is cross-compiled; make sure it really starts on a Mac.
+  macos-smoke-test:
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+      - name: Start the binary
+        run: |
+          tar -xzf linkscout-darwin-arm64.tar.gz
+          ./linkscout-*-darwin-arm64/linkscout -version
+
+  publish:
+    needs: [build, macos-smoke-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: upload
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" upload/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "LinkScout $GITHUB_REF_NAME" \
+            --generate-notes

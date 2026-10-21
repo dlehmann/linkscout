@@ -1,0 +1,551 @@
+package server
+
+import (
+	"archive/zip"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/dlehmann/linkscout/internal/crawler"
+	"github.com/dlehmann/linkscout/internal/i18n"
+)
+
+// target is the website that gets checked during the tests.
+func target(t *testing.T) *httptest.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/{$}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<title>Start</title><a href="/ok">ok</a><a href="/broken">broken</a><img src="/a.png">`)
+	})
+	mux.HandleFunc("/ok", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<title>OK</title>`)
+	})
+	mux.HandleFunc("/a.png", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Write([]byte("PNG"))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func newUI(t *testing.T, lang i18n.Lang) (*Server, *httptest.Server) {
+	s := New(Options{Lang: lang, Version: "test", Defaults: Defaults{MirrorBase: t.TempDir()}}, crawler.New())
+	ui := httptest.NewServer(s.Handler())
+	t.Cleanup(ui.Close)
+	return s, ui
+}
+
+func do(t *testing.T, method, url string, body any) (*http.Response, []byte) {
+	t.Helper()
+	var r io.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		r = bytes.NewReader(b)
+	}
+	req, _ := http.NewRequest(method, url, r)
+	req.Header.Set("X-LinkScout", "1")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp, b
+}
+
+func waitIdle(t *testing.T, s *Server) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if !s.crawler.Progress().Running && !s.mirrors.running() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timeout waiting for job")
+}
+
+func TestIndexInjectsStateAndLanguage(t *testing.T) {
+	_, ui := newUI(t, i18n.DE)
+	resp, body := do(t, "GET", ui.URL+"/", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	page := string(body)
+	if strings.Contains(page, "__INITIAL_STATE__") {
+		t.Error("placeholder not replaced")
+	}
+	if !strings.Contains(page, `<html lang="de">`) {
+		t.Error("lang attribute not set")
+	}
+	if !strings.Contains(page, `"tab.stats":"Übersicht"`) {
+		t.Error("German messages not injected")
+	}
+	for _, f := range []string{"/static/app.js", "/static/style.css", "/static/favicon.svg"} {
+		if r, _ := do(t, "GET", ui.URL+f, nil); r.StatusCode != 200 {
+			t.Errorf("%s: %d", f, r.StatusCode)
+		}
+	}
+}
+
+func TestInjectedStateCannotBreakOutOfScript(t *testing.T) {
+	s, ui := newUI(t, i18n.EN)
+	s.crawler.Load(crawler.Config{StartURL: "https://e.com"}, []crawler.Result{{URL: "https://e.com/", Title: "</script><script>alert(1)</script>"}})
+	_, body := do(t, "GET", ui.URL+"/", nil)
+	if strings.Contains(string(body), "<script>alert(1)") {
+		t.Error("title was injected unescaped")
+	}
+}
+
+func TestGuard(t *testing.T) {
+	_, ui := newUI(t, i18n.EN)
+	// POST without the custom header (what a cross-site form would send).
+	resp, err := http.Post(ui.URL+"/api/stop", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("POST without header: %d", resp.StatusCode)
+	}
+	// Foreign Host header (DNS rebinding).
+	req, _ := http.NewRequest("GET", ui.URL+"/api/state", nil)
+	req.Host = "evil.example"
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("foreign host: %d", resp.StatusCode)
+	}
+	for host, want := range map[string]bool{"127.0.0.1:8088": true, "localhost": true, "[::1]:80": true, "app.localhost:1": true, "example.com": false, "10.0.0.1:8088": false} {
+		if isLoopbackHost(host) != want {
+			t.Errorf("isLoopbackHost(%q) != %v", host, want)
+		}
+	}
+}
+
+func TestCheckRecheckExport(t *testing.T) {
+	site := target(t)
+	s, ui := newUI(t, i18n.EN)
+
+	resp, body := do(t, "POST", ui.URL+"/api/check", CheckRequest{URL: "nonsense"})
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "valid http(s) URL") {
+		t.Errorf("invalid URL: %d %s", resp.StatusCode, body)
+	}
+
+	resp, _ = do(t, "POST", ui.URL+"/api/check", CheckRequest{URL: site.URL, Referer: "https://ref.example/"})
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("start: %d", resp.StatusCode)
+	}
+	waitIdle(t, s)
+
+	_, body = do(t, "GET", ui.URL+"/api/state", nil)
+	var st State
+	if err := json.Unmarshal(body, &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Stats.Total != 4 || st.Stats.OK != 3 || st.Stats.Broken != 1 {
+		t.Errorf("stats = %+v", st.Stats)
+	}
+	if st.Config.Fetch.Referer != "https://ref.example/" {
+		t.Errorf("referer not stored: %+v", st.Config.Fetch)
+	}
+
+	// Re-check only failed URLs.
+	resp, body = do(t, "POST", ui.URL+"/api/check", CheckRequest{Mode: "failed"})
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("recheck: %d %s", resp.StatusCode, body)
+	}
+	waitIdle(t, s)
+	if p := s.crawler.Progress(); p.Mode != "failed" || p.Total != 4 {
+		t.Errorf("recheck progress = %+v", p)
+	}
+
+	// Export.
+	resp, body = do(t, "GET", ui.URL+"/api/export", nil)
+	if cd := resp.Header.Get("Content-Disposition"); !strings.Contains(cd, "attachment; filename=\"linkscout-127.0.0.1_") {
+		t.Errorf("Content-Disposition = %q", cd)
+	}
+	var rep crawler.Report
+	if err := json.Unmarshal(body, &rep); err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Results) != 4 || rep.StartURL != site.URL+"/" || rep.Generator != "LinkScout test" {
+		t.Errorf("report = %+v", rep)
+	}
+
+	// Import the report into a fresh instance.
+	s2, ui2 := newUI(t, i18n.EN)
+	resp, _ = do(t, "POST", ui2.URL+"/api/import", rep)
+	if resp.StatusCode != 200 || len(s2.crawler.Results()) != 4 {
+		t.Errorf("import: %d, %d results", resp.StatusCode, len(s2.crawler.Results()))
+	}
+}
+
+func TestCheckBusy(t *testing.T) {
+	block := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-block }))
+	defer slow.Close()
+	defer close(block)
+	s, ui := newUI(t, i18n.DE)
+	do(t, "POST", ui.URL+"/api/check", CheckRequest{URL: slow.URL})
+	resp, body := do(t, "POST", ui.URL+"/api/check", CheckRequest{URL: slow.URL})
+	if resp.StatusCode != http.StatusConflict || !strings.Contains(string(body), "läuft bereits") {
+		t.Errorf("busy: %d %s", resp.StatusCode, body)
+	}
+	do(t, "POST", ui.URL+"/api/stop", nil)
+	s.crawler.Stop()
+}
+
+func TestMirrorAndZip(t *testing.T) {
+	site := target(t)
+	s, ui := newUI(t, i18n.EN)
+
+	if resp, _ := do(t, "GET", ui.URL+"/api/mirror/zip", nil); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("zip before mirror: %d", resp.StatusCode)
+	}
+	out := filepath.Join(t.TempDir(), "copy")
+	resp, body := do(t, "POST", ui.URL+"/api/mirror", MirrorRequest{URL: site.URL, OutDir: out})
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("mirror: %d %s", resp.StatusCode, body)
+	}
+	waitIdle(t, s)
+	if jobs := s.mirrors.views(); len(jobs) != 1 || jobs[0].Status != JobDone || jobs[0].Progress.Files != 3 {
+		t.Errorf("mirror jobs = %+v", jobs)
+	}
+	resp, body = do(t, "GET", ui.URL+"/api/mirror/zip", nil)
+	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "application/zip" {
+		t.Fatalf("zip: %d", resp.StatusCode)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, f := range zr.File {
+		names = append(names, f.Name)
+	}
+	if strings.Join(names, ",") != "a.png,index.html,ok/index.html" {
+		t.Errorf("zip entries: %v", names)
+	}
+}
+
+func TestMirrorList(t *testing.T) {
+	site := target(t)
+	s, ui := newUI(t, i18n.DE)
+	base := t.TempDir()
+	add := func(req MirrorRequest) (*http.Response, []byte) {
+		return do(t, "POST", ui.URL+"/api/mirror/queue", req)
+	}
+
+	a := filepath.Join(base, "a")
+	if resp, body := add(MirrorRequest{URL: site.URL, OutDir: a, UserAgent: "UA-A", Username: "joe", Password: "secret"}); resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("queue a: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := add(MirrorRequest{URL: site.URL + "/ok", OutDir: filepath.Join(base, "b"), MaxPages: 1, External: new(bool)}); resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("queue b: %d %s", resp.StatusCode, body)
+	}
+	// Same target directory twice would mix two copies.
+	if resp, body := add(MirrorRequest{URL: site.URL, OutDir: a}); resp.StatusCode != http.StatusConflict || !strings.Contains(string(body), "Zielverzeichnis") {
+		t.Errorf("duplicate dir: %d %s", resp.StatusCode, body)
+	}
+
+	// Without a target directory the default one gets a free suffix.
+	add(MirrorRequest{URL: site.URL})
+	add(MirrorRequest{URL: site.URL + "/other"})
+	if jobs := s.mirrors.views(); len(jobs) != 4 || jobs[3].OutDir != jobs[2].OutDir+"-2" {
+		t.Fatalf("default dirs: %+v", jobs)
+	}
+	do(t, "POST", ui.URL+"/api/mirror/remove", JobRequest{ID: 3})
+	do(t, "POST", ui.URL+"/api/mirror/remove", JobRequest{ID: 4})
+
+	_, body := do(t, "GET", ui.URL+"/api/state", nil)
+	if strings.Contains(string(body), "secret") {
+		t.Error("password leaked into /api/state")
+	}
+	var st State
+	if err := json.Unmarshal(body, &st); err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Mirrors) != 2 || st.Mirrors[0].Status != JobQueued || st.Mirrors[0].UserAgent != "UA-A" || st.Mirrors[1].MaxPages != 1 || !st.Mirrors[0].External || st.Mirrors[1].External {
+		t.Fatalf("queued jobs = %+v", st.Mirrors)
+	}
+	if resp, _ := do(t, "GET", ui.URL+"/api/mirror/zip", nil); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("zip before start: %d", resp.StatusCode)
+	}
+
+	if resp, body := do(t, "POST", ui.URL+"/api/mirror/start", nil); resp.StatusCode != http.StatusOK {
+		t.Fatalf("start all: %d %s", resp.StatusCode, body)
+	}
+	waitIdle(t, s)
+	jobs := s.mirrors.views()
+	for _, j := range jobs {
+		if j.Status != JobDone {
+			t.Errorf("job %d: %s %+v", j.ID, j.Status, j.Progress)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(a, "index.html")); err != nil {
+		t.Error(err)
+	}
+	// The start directory /ok/ is the root of the copy.
+	if _, err := os.Stat(filepath.Join(base, "b", "index.html")); err != nil {
+		t.Error(err)
+	}
+	resp, _ := do(t, "GET", fmt.Sprintf("%s/api/mirror/zip?id=%d", ui.URL, jobs[1].ID), nil)
+	if resp.StatusCode != 200 || !strings.Contains(resp.Header.Get("Content-Disposition"), `"b.zip"`) {
+		t.Errorf("zip b: %d %s", resp.StatusCode, resp.Header.Get("Content-Disposition"))
+	}
+
+	// Remove one entry, then all finished ones.
+	if resp, body := do(t, "POST", ui.URL+"/api/mirror/remove", JobRequest{ID: jobs[0].ID}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("remove: %d %s", resp.StatusCode, body)
+	}
+	if resp, _ := do(t, "POST", ui.URL+"/api/mirror/remove", JobRequest{ID: jobs[0].ID}); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("remove twice: %d", resp.StatusCode)
+	}
+	do(t, "POST", ui.URL+"/api/mirror/remove", JobRequest{Done: true})
+	if n := len(s.mirrors.views()); n != 0 {
+		t.Errorf("%d jobs left", n)
+	}
+}
+
+func TestMirrorListStop(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	t.Cleanup(slow.Close)
+	s, ui := newUI(t, i18n.EN)
+	resp, body := do(t, "POST", ui.URL+"/api/mirror", MirrorRequest{URL: slow.URL, OutDir: filepath.Join(t.TempDir(), "x")})
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("mirror: %d %s", resp.StatusCode, body)
+	}
+	if !s.mirrors.running() {
+		t.Fatal("job not running")
+	}
+	do(t, "POST", ui.URL+"/api/mirror/stop", nil)
+	waitIdle(t, s)
+	if j := s.mirrors.views()[0]; j.Status != JobStopped {
+		t.Errorf("status = %s", j.Status)
+	}
+}
+
+func TestExpandMirrorDir(t *testing.T) {
+	now := time.Date(2026, 10, 21, 15, 30, 12, 0, time.UTC)
+	for _, c := range []struct{ tpl, url, want string }{
+		{"/d/<host>", "https://www.Example.com:8443/x", "/d/www.Example.com_8443"},
+		{"/d/<domain>/<date>-<time>", "https://WWW.example.com:8443/x", "/d/example.com/2026-10-21-153012"},
+		{"/d/<host>", "http://a/../b", "/d/a"},
+		{"/d/plain", "https://example.com", "/d/plain"},
+	} {
+		if got := ExpandMirrorDir(c.tpl, c.url, now); got != c.want {
+			t.Errorf("ExpandMirrorDir(%q, %q) = %q, want %q", c.tpl, c.url, got, c.want)
+		}
+	}
+}
+
+func TestDefaultMirrorDir(t *testing.T) {
+	if got := DefaultMirrorDir("/tmp/x", "https://www.example.com:8443/path"); got != "/tmp/x/linkscout/www.example.com_8443" {
+		t.Errorf("DefaultMirrorDir = %q", got)
+	}
+	t.Setenv("HOME", "/home/test")
+	if got := expandHome("~/sites"); got != "/home/test/sites" {
+		t.Errorf("expandHome = %q", got)
+	}
+}
+
+// The UI has no referer field; a referer from the command line must still be used.
+func TestCLIRefererUsedForUIChecks(t *testing.T) {
+	site := target(t)
+	s := New(Options{Lang: i18n.EN, Defaults: Defaults{Referer: "https://cli.example/"}}, crawler.New())
+	ui := httptest.NewServer(s.Handler())
+	defer ui.Close()
+	if resp, _ := do(t, "POST", ui.URL+"/api/check", CheckRequest{URL: site.URL}); resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("start: %d", resp.StatusCode)
+	}
+	waitIdle(t, s)
+	if got := s.crawler.Config().Fetch.Referer; got != "https://cli.example/" {
+		t.Errorf("referer = %q", got)
+	}
+}
+
+func TestAuthPasswordStaysOnServer(t *testing.T) {
+	var lastPass string
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, p, _ := r.BasicAuth()
+		lastPass = p
+		if p != "pw" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, "<title>ok</title>")
+	}))
+	defer site.Close()
+	s, ui := newUI(t, i18n.EN)
+
+	do(t, "POST", ui.URL+"/api/check", CheckRequest{URL: site.URL, Username: "admin", Password: "pw"})
+	waitIdle(t, s)
+	_, body := do(t, "GET", ui.URL+"/api/state", nil)
+	if strings.Contains(string(body), `"pw"`) || !strings.Contains(string(body), `"username": "admin"`) {
+		t.Errorf("state leaks password or lacks username:\n%s", body)
+	}
+	_, page := do(t, "GET", ui.URL+"/", nil)
+	_, export := do(t, "GET", ui.URL+"/api/export", nil)
+	if strings.Contains(string(page), `"pw"`) || strings.Contains(string(export), `"pw"`) {
+		t.Error("password leaked into page or export")
+	}
+	// After a reload the password field is empty: the known password is reused.
+	lastPass = ""
+	do(t, "POST", ui.URL+"/api/check", CheckRequest{URL: site.URL, Username: "admin"})
+	waitIdle(t, s)
+	if lastPass != "pw" || s.crawler.Results()[0].Status != 200 {
+		t.Errorf("password not reused: sent %q, status %d", lastPass, s.crawler.Results()[0].Status)
+	}
+}
+
+func TestMirrorOpenFolder(t *testing.T) {
+	site := target(t)
+	var opened []string
+	s := New(Options{Lang: i18n.EN, Version: "test", Defaults: Defaults{MirrorBase: t.TempDir()},
+		OpenDir: func(dir string) error { opened = append(opened, dir); return nil }}, crawler.New())
+	ui := httptest.NewServer(s.Handler())
+	t.Cleanup(ui.Close)
+
+	out := filepath.Join(t.TempDir(), "copy")
+	do(t, "POST", ui.URL+"/api/mirror/queue", MirrorRequest{URL: site.URL, OutDir: out})
+	id := s.mirrors.views()[0].ID
+	// Not finished yet: nothing to open.
+	if resp, _ := do(t, "POST", ui.URL+"/api/mirror/open", JobRequest{ID: id}); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("open before download: %d", resp.StatusCode)
+	}
+	do(t, "POST", ui.URL+"/api/mirror/start", JobRequest{ID: id})
+	waitIdle(t, s)
+	if resp, body := do(t, "POST", ui.URL+"/api/mirror/open", JobRequest{ID: id}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("open: %d %s", resp.StatusCode, body)
+	}
+	if len(opened) != 1 || opened[0] != out {
+		t.Errorf("opened %v, want [%s]", opened, out)
+	}
+	if resp, _ := do(t, "POST", ui.URL+"/api/mirror/open", JobRequest{ID: 999}); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("unknown id: %d", resp.StatusCode)
+	}
+
+	// Reachable from other machines: never pop up windows on the server.
+	s.opts.AllowAnyHost = true
+	if resp, _ := do(t, "POST", ui.URL+"/api/mirror/open", JobRequest{ID: id}); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("open with -listen on a public address: %d", resp.StatusCode)
+	}
+}
+
+// Export → import restores the results, so a report can be re-checked later.
+func TestImportRoundTrip(t *testing.T) {
+	site := target(t)
+	s, ui := newUI(t, i18n.EN)
+	do(t, "POST", ui.URL+"/api/check", CheckRequest{URL: site.URL})
+	waitIdle(t, s)
+	_, report := do(t, "GET", ui.URL+"/api/export", nil)
+
+	s2, ui2 := newUI(t, i18n.EN)
+	var rep crawler.Report
+	if err := json.Unmarshal(report, &rep); err != nil {
+		t.Fatal(err)
+	}
+	resp, body := do(t, "POST", ui2.URL+"/api/import", rep)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("import: %d %s", resp.StatusCode, body)
+	}
+	if got, want := len(s2.crawler.Results()), len(s.crawler.Results()); got != want || got == 0 {
+		t.Errorf("imported %d results, want %d", got, want)
+	}
+	if resp, _ := do(t, "POST", ui2.URL+"/api/import", map[string]string{"startUrl": "not a url"}); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("invalid report: %d", resp.StatusCode)
+	}
+}
+
+// A password typed for an offline copy is reused when the page sends an
+// empty password field for the same user (after a reload).
+func TestMirrorPasswordReuse(t *testing.T) {
+	var got []string
+	var mu sync.Mutex
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, p, _ := r.BasicAuth()
+		mu.Lock()
+		got = append(got, p)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, "<title>x</title>")
+	}))
+	defer site.Close()
+	s, ui := newUI(t, i18n.EN)
+	base := t.TempDir()
+	do(t, "POST", ui.URL+"/api/mirror", MirrorRequest{URL: site.URL, OutDir: filepath.Join(base, "1"), Username: "ann", Password: "s3cret"})
+	waitIdle(t, s)
+	do(t, "POST", ui.URL+"/api/mirror", MirrorRequest{URL: site.URL, OutDir: filepath.Join(base, "2"), Username: "ann"})
+	waitIdle(t, s)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 2 || got[0] != "s3cret" || got[1] != "s3cret" {
+		t.Errorf("passwords sent: %q", got)
+	}
+}
+
+// Close stops running offline copies and lets them remove their temporary
+// directory (important on Ctrl+C).
+func TestCloseStopsOfflineCopies(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(10 * time.Second):
+		}
+	}))
+	defer slow.Close()
+	s, ui := newUI(t, i18n.EN)
+	out := filepath.Join(t.TempDir(), "x")
+	do(t, "POST", ui.URL+"/api/mirror", MirrorRequest{URL: slow.URL, OutDir: out})
+	time.Sleep(50 * time.Millisecond)
+	start := time.Now()
+	s.Close(5 * time.Second)
+	if s.mirrors.running() || time.Since(start) > 4*time.Second {
+		t.Errorf("still running after Close (%v)", time.Since(start))
+	}
+	if _, err := os.Stat(filepath.Join(out, ".linkscout-tmp")); err == nil {
+		t.Error("temporary directory left behind")
+	}
+}
+
+func TestHelpers(t *testing.T) {
+	if clamp(0, 1, 64) != 1 || clamp(100, 1, 64) != 64 || clamp(8, 1, 64) != 8 {
+		t.Error("clamp")
+	}
+	if orDefault(0, 4) != 4 || orDefault(2, 4) != 2 {
+		t.Error("orDefault")
+	}
+	t.Setenv("XDG_DOWNLOAD_DIR", "/data/dl")
+	if DefaultMirrorBase() != "/data/dl" {
+		t.Errorf("XDG_DOWNLOAD_DIR ignored: %q", DefaultMirrorBase())
+	}
+	if !isLoopbackHost("localhost:8088") || !isLoopbackHost("[::1]:80") || !isLoopbackHost("app.localhost") ||
+		isLoopbackHost("example.com") || isLoopbackHost("192.168.1.2:8088") {
+		t.Error("isLoopbackHost")
+	}
+	if sanitizeName("www.example.com:8443/x") != "www.example.com_8443_x" {
+		t.Errorf("sanitizeName = %q", sanitizeName("www.example.com:8443/x"))
+	}
+}

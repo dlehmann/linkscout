@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LinkScout</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+  <!-- Initial state (translations, defaults, results) injected by the Go server. -->
+  <script>window.LINKSCOUT = /*__INITIAL_STATE__*/null;</script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="/static/favicon.svg" alt="" width="28" height="28">
+      <div class="brand-name" data-i18n="app.title"></div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="results" data-i18n="tab.results"></button>
+      <button role="tab" data-tab="mirror" data-i18n="tab.mirror"></button>
+    </nav>
+    <button class="icon-btn" id="theme-toggle" data-i18n-title="theme.toggle" aria-label="theme">
+      <!-- half filled circle: light / dark -->
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 2.5a7.5 7.5 0 0 1 0 15z" fill="currentColor"/></svg>
+    </button>
+  </header>
+
+  <main>
+    <!-- Check settings, shared by all tabs -->
+    <section class="panel" id="controls">
+      <form id="check-form" autocomplete="off">
+        <div class="row url-row">
+          <label class="grow">
+            <span data-i18n="form.url"></span>
+            <input type="url" name="url" required data-i18n-placeholder="form.url_placeholder">
+          </label>
+          <button type="submit" class="primary" id="btn-start" data-i18n="form.start"></button>
+        </div>
+        <div class="row">
+          <label class="grow">
+            <span data-i18n="form.user_agent"></span>
+            <span class="input-with-btn">
+              <input type="text" name="userAgent">
+              <button type="button" class="ghost small" id="btn-reset-ua" data-i18n="form.reset_ua"></button>
+            </span>
+          </label>
+        </div>
+        <details class="advanced">
+          <summary data-i18n="form.advanced"></summary>
+          <div class="row">
+            <label><span data-i18n="form.concurrency"></span><input type="number" name="concurrency" min="1" max="64"></label>
+            <label><span data-i18n="form.max_pages"></span><input type="number" name="maxPages" min="0"></label>
+            <label><span data-i18n="form.delay"></span><input type="number" name="delayMs" min="0" step="50"></label>
+            <label class="check"><input type="checkbox" name="checkExternal"> <span data-i18n="form.check_external"></span></label>
+          </div>
+          <div class="subhead" data-i18n="form.auth"></div>
+          <div class="row">
+            <label class="grow"><span data-i18n="form.username"></span><input type="text" name="username" autocomplete="off" spellcheck="false"></label>
+            <label class="grow"><span data-i18n="form.password"></span><input type="password" name="password" autocomplete="new-password"></label>
+          </div>
+        </details>
+        <div class="row actions">
+          <div class="recheck">
+            <button type="button" id="btn-recheck" data-i18n="form.recheck"></button>
+            <select id="recheck-mode" aria-label="mode">
+              <option value="failed" data-i18n="form.recheck_failed"></option>
+              <option value="all" data-i18n="form.recheck_all"></option>
+            </select>
+          </div>
+          <button type="button" id="btn-stop" class="danger" data-i18n="form.stop"></button>
+          <span class="spacer"></span>
+          <a class="button" id="btn-export" href="/api/export" download data-i18n="form.export"></a>
+          <label class="button ghost" id="btn-import"><span data-i18n="form.import"></span><input type="file" accept="application/json,.json" hidden></label>
+        </div>
+      </form>
+      <div class="progress" aria-live="polite">
+        <div class="bar"><div class="fill" id="progress-fill"></div></div>
+        <div class="progress-text" id="progress-text"></div>
+      </div>
+      <div class="error-box" id="error-box" hidden></div>
+    </section>
+
+    <!-- Sub-tabs of the link checker -->
+    <nav class="subtabs" id="subtabs" role="tablist">
+      <button role="tab" data-tab="stats" data-i18n="tab.stats"></button>
+      <button role="tab" data-tab="results" data-i18n="tab.list"></button>
+    </nav>
+
+    <!-- Results -->
+    <section class="tab-panel" id="tab-results">
+      <div class="filters">
+        <input type="search" id="f-search" data-i18n-placeholder="filter.search">
+        <select id="f-kind"></select>
+        <select id="f-status"></select>
+        <select id="f-type"></select>
+        <select id="f-depth"></select>
+        <select id="f-time"></select>
+        <button type="button" class="ghost small" id="f-reset" data-i18n="filter.reset"></button>
+        <span class="spacer"></span>
+        <span class="muted" id="f-count"></span>
+      </div>
+      <div class="table-wrap">
+        <table id="results-table">
+          <thead>
+            <tr>
+              <th data-sort="url" data-i18n="col.url"></th>
+              <th data-sort="status" class="num" data-i18n="col.status"></th>
+              <th data-sort="type" data-i18n="col.type"></th>
+              <th data-sort="title" data-i18n="col.title"></th>
+              <th data-sort="kind" data-i18n="col.kind"></th>
+              <th data-sort="depth" class="num" data-i18n="col.depth" data-i18n-title="stats.chart_depth_sub"></th>
+              <th data-sort="size" class="num" data-i18n="col.size"></th>
+              <th data-sort="durationMs" class="num" data-i18n="col.time"></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <div class="empty" id="table-empty" data-i18n="table.empty" hidden></div>
+      </div>
+    </section>
+
+    <!-- Statistics -->
+    <section class="tab-panel" id="tab-stats">
+      <div id="stats-body"></div>
+    </section>
+
+    <!-- Offline copy -->
+    <section class="tab-panel" id="tab-mirror">
+      <div class="panel">
+        <p class="intro" data-i18n="mirror.intro"></p>
+        <form id="mirror-form" autocomplete="off">
+          <div class="row url-row">
+            <label class="grow">
+              <span data-i18n="form.url"></span>
+              <input type="url" name="url" required data-i18n-placeholder="form.url_placeholder">
+            </label>
+          </div>
+          <div class="row">
+            <label class="grow">
+              <span data-i18n="mirror.out_dir"></span>
+              <span class="input-with-btn">
+                <input type="text" name="outDir" required spellcheck="false">
+                <button type="button" class="ghost small" id="btn-reset-dir" data-i18n="mirror.reset_dir"></button>
+              </span>
+            </label>
+          </div>
+          <div class="field-hint">
+            <div id="dir-placeholders"></div>
+            <div id="dir-preview" class="mono"></div>
+          </div>
+          <div class="row">
+            <label class="grow">
+              <span data-i18n="form.user_agent"></span>
+              <span class="input-with-btn">
+                <input type="text" name="userAgent">
+                <button type="button" class="ghost small" id="btn-mirror-reset-ua" data-i18n="form.reset_ua"></button>
+              </span>
+            </label>
+          </div>
+          <details class="advanced">
+            <summary data-i18n="form.advanced"></summary>
+            <div class="row">
+              <label><span data-i18n="form.concurrency"></span><input type="number" name="concurrency" min="1" max="32"></label>
+              <label><span data-i18n="form.max_pages"></span><input type="number" name="maxPages" min="0"></label>
+              <label><span data-i18n="form.delay"></span><input type="number" name="delayMs" min="0" step="50"></label>
+            </div>
+            <div class="subhead" data-i18n="form.auth"></div>
+            <div class="row">
+              <label class="grow"><span data-i18n="form.username"></span><input type="text" name="username" autocomplete="off" spellcheck="false"></label>
+              <label class="grow"><span data-i18n="form.password"></span><input type="password" name="password" autocomplete="new-password"></label>
+            </div>
+          </details>
+          <div class="row actions">
+            <button type="submit" class="primary" data-i18n="mirror.add"></button>
+            <button type="submit" name="start" value="1" data-i18n="mirror.start"></button>
+          </div>
+        </form>
+        <div class="error-box" id="mirror-error" hidden></div>
+      </div>
+      <div class="panel">
+        <div class="list-head">
+          <h3 data-i18n="mirror.list"></h3>
+          <span class="spacer"></span>
+          <button type="button" class="small" id="btn-mirror-start-all" data-i18n="mirror.start_all"></button>
+          <button type="button" class="small danger" id="btn-mirror-stop" data-i18n="mirror.stop_all"></button>
+          <button type="button" class="small ghost" id="btn-mirror-clear" data-i18n="mirror.clear_done"></button>
+        </div>
+        <p class="muted hint" data-i18n="mirror.list_hint"></p>
+        <ul class="jobs" id="mirror-jobs"></ul>
+        <div class="empty" id="mirror-empty" data-i18n="mirror.list_empty" hidden></div>
+      </div>
+    </section>
+  </main>
+
+  <footer id="footer"></footer>
+
+  <dialog id="detail">
+    <div class="detail-head">
+      <h2 id="detail-title"></h2>
+      <button class="icon-btn" id="detail-close" data-i18n-title="detail.close" aria-label="close">✕</button>
+    </div>
+    <dl id="detail-body"></dl>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

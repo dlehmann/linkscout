@@ -1,0 +1,30 @@
+# Runs the checks on every push and pull request: formatting, go vet and the
+# unit tests with the race detector, on Linux and on macOS (Apple Silicon).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt and go vet
+        run: make vet
+      - name: Unit tests (race detector)
+        run: make race
+      - name: Build
+        run: make build && ./linkscout -version

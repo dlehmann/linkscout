@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=LinkScout
+GenericName=Website link checker
+GenericName[de]=Link-Checker für Websites
+Comment=Check all links of a website and create offline copies
+Comment[de]=Alle Links einer Website prüfen und Offline-Kopien erstellen
+Exec=linkscout
+Icon=linkscout
+Terminal=false
+Categories=Development;WebDevelopment;
+Keywords=links;broken;404;crawler;website;offline;mirror;
+StartupNotify=false
