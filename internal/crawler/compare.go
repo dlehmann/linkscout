@@ -3,6 +3,7 @@ package crawler
 import (
 	"encoding/csv"
 	"io"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -108,14 +109,27 @@ var CSVHeader = []string{
 	"seo_headings", "seo_lang", "seo_viewport", "seo_hreflang", "seo_jsonld",
 	"seo_jsonld_errors", "seo_social", "seo_images_no_alt", "seo_mixed_content",
 	"seo_fragment_links", "seo_security_missing", "seo_cert_not_after", "seo_content_hash",
+	"third_party",
 }
+
+// CSVSearchHeader are the extra columns of WriteCSV with a content search.
+var CSVSearchHeader = []string{"search_matches", "search_snippets"}
 
 // WriteCSV writes the results as CSV table, one row per URL. Columns with
 // several values (redirects, linking pages, issues, titles …) hold one value
-// per line. Run Analyze first to fill the issue columns.
-func WriteCSV(w io.Writer, rs []Result) error {
+// per line. Run Analyze first to fill the issue columns. With a search the
+// matches of every URL are added (CSVSearchHeader).
+func WriteCSV(w io.Writer, rs []Result, search *SearchResult) error {
 	cw := csv.NewWriter(w)
-	if err := cw.Write(CSVHeader); err != nil {
+	header := CSVHeader
+	matches := map[string]SearchMatch{}
+	if search != nil {
+		header = append(slices.Clone(CSVHeader), CSVSearchHeader...)
+		for _, m := range search.Matches {
+			matches[m.URL] = m
+		}
+	}
+	if err := cw.Write(header); err != nil {
 		return err
 	}
 	lines := func(list []string) string { return strings.Join(list, "\n") }
@@ -151,9 +165,17 @@ func WriteCSV(w io.Writer, rs []Result) error {
 				lines(p.H1), strings.Join(headings, " "), p.Lang, strconv.FormatBool(p.Viewport),
 				lines(hreflang), strconv.Itoa(p.JSONLD), lines(p.JSONLDErrors), lines(p.Social),
 				lines(p.ImagesNoAlt), lines(p.Mixed), lines(p.Fragments), lines(p.Security),
-				stamp(p.CertNotAfter), p.ContentHash)
+				stamp(p.CertNotAfter), p.ContentHash, lines(p.ThirdParty))
 		} else {
 			row = append(row, make([]string, len(CSVHeader)-len(row))...)
+		}
+		if search != nil {
+			m := matches[r.URL]
+			snippets := make([]string, len(m.Snippets))
+			for i, sn := range m.Snippets {
+				snippets[i] = sn.Before + sn.Match + sn.After
+			}
+			row = append(row, strconv.Itoa(m.Count), lines(snippets))
 		}
 		if err := cw.Write(row); err != nil {
 			return err

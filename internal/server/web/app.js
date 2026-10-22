@@ -26,9 +26,12 @@
 
   // UI-only state; sort and filters survive a reload via localStorage.
   const ui = Object.assign(
-    { tab: "stats", sortKey: "", sortDesc: false, search: "", kind: "", status: "", type: "", depth: "", time: "", issue: "", tlen: "", dlen: "", statsExternal: false },
+    { tab: "stats", sortKey: "", sortDesc: false, search: "", kind: "", status: "", type: "", depth: "", time: "", issue: "", tp: "", tlen: "", dlen: "", statsExternal: false },
     load("linkscout.ui")
   );
+  // The content search runs on the server; `found` holds its result
+  // (crawler.SearchResult) and filters the list until it is cleared.
+  const content = { q: "", mode: "text", regex: false, caseSensitive: false, found: null, hits: null, rev: "", busy: false };
   delete ui.drill; // left over from earlier versions
   delete ui.site;
 
@@ -444,6 +447,31 @@
     return r.kind === k;
   }
 
+  /** Hosts of the external resources of a page (crawler.PageSEO.ThirdParty). */
+  function tpHosts(r) {
+    const hosts = [];
+    for (const u of r.seo?.thirdParty || []) {
+      let h;
+      try { h = new URL(u).hostname.toLowerCase(); } catch { continue; }
+      if (!hosts.includes(h)) hosts.push(h);
+    }
+    return hosts;
+  }
+  /** Category of an external service host (crawler.TPCategory, sent with the state). */
+  function tpCategory(host) {
+    return (state.thirdParty?.hosts || []).find((h) => h.host === host)?.category || "other";
+  }
+  /**
+   * External service filter: a host, "*" (any external service, own
+   * sub-domains do not count) or "-" (an analysed page without any).
+   */
+  function tpMatches(r, v) {
+    const hosts = tpHosts(r);
+    if (v === "*") return hosts.some((h) => tpCategory(h) !== "own");
+    if (v === "-") return !!r.seo && r.status === 200 && !hosts.some((h) => tpCategory(h) !== "own");
+    return hosts.includes(v);
+  }
+
   /** Status filter: a class (2xx …), "not200", "broken", "redirected" or an exact code "c404". */
   function statusMatches(r, st) {
     if (st === "not200") return r.status !== 200 && !r.pending;
@@ -474,6 +502,8 @@
       if (ui.tlen && lengthBucket(r.seo, "titles", TITLE_BUCKETS) !== +ui.tlen) return false;
       if (ui.dlen && lengthBucket(r.seo, "descriptions", DESC_BUCKETS) !== +ui.dlen) return false;
       if (ui.time && !timeMatches(r, ui.time)) return false;
+      if (ui.tp && !tpMatches(r, ui.tp)) return false;
+      if (content.hits && !content.hits.has(r.url)) return false;
       if (q && !`${r.url} ${r.finalUrl || ""} ${r.title || ""}`.toLowerCase().includes(q)) return false;
       return true;
     });
@@ -484,8 +514,8 @@
     const k = ui.sortKey;
     if (!k) return rows;
     const dir = ui.sortDesc ? -1 : 1;
-    const num = k === "status" || k === "durationMs" || k === "depth" || k === "size" || k === "issues";
-    const val = (r) => (k === "type" ? typeOf(r) : k === "issues" ? issueWeight(r) : k === "lastModified" ? (isSet(r.lastModified) ? r.lastModified : "") : r[k]);
+    const num = k === "status" || k === "durationMs" || k === "depth" || k === "size" || k === "issues" || k === "matches";
+    const val = (r) => (k === "type" ? typeOf(r) : k === "issues" ? issueWeight(r) : k === "matches" ? content.hits?.get(r.url)?.count || 0 : k === "lastModified" ? (isSet(r.lastModified) ? r.lastModified : "") : r[k]);
     return rows.slice().sort((a, b) => {
       let x = val(a), y = val(b);
       if (num) {
@@ -536,6 +566,11 @@
       ...(analysed ? ["error", "warning", "notice", "none"].map((s) => [`sev:${s}`, t(`filter.sev_${s}`)]) : []),
       ...issues.map((i) => [i.id, t(`issue.${i.id}`)]),
     ], ui.issue);
+    const tpList = state.thirdParty?.hosts || [];
+    fillSelect($("#f-tp"), t("filter.all"), [
+      ...(state.thirdParty ? [["*", t("filter.any_tp")], ["-", t("filter.no_tp")]] : []),
+      ...tpList.map((h) => [h.host, `${h.host} (${t(`tp.cat.${h.category}`)})`]),
+    ], ui.tp);
     const lenOptions = (bounds) => (analysed ? bounds.map((_, i) => [String(i), lengthLabel(bounds, i)]) : []);
     fillSelect($("#f-tlen"), t("filter.all"), lenOptions(TITLE_BUCKETS), ui.tlen);
     fillSelect($("#f-dlen"), t("filter.all"), lenOptions(DESC_BUCKETS), ui.dlen);
@@ -543,7 +578,10 @@
 
     // a filter that is set is highlighted, so a restricted list is obvious
     for (const sel of $$(".filters select")) sel.classList.toggle("active", sel.value !== "");
-    fillSelect($("#sort-key"), t("sort.none"), SORT_KEYS.map(([k, label]) => [k, t(label)]), ui.sortKey);
+    renderSearch();
+    const sortKeys = content.hits ? SORT_KEYS.concat([["matches", "sort.matches"]]) : SORT_KEYS;
+    if (ui.sortKey === "matches" && !content.hits) ui.sortKey = "";
+    fillSelect($("#sort-key"), t("sort.none"), sortKeys.map(([k, label]) => [k, t(label)]), ui.sortKey);
     const dir = $("#sort-dir");
     dir.hidden = !ui.sortKey;
     dir.textContent = t(ui.sortDesc ? "sort.desc" : "sort.asc");
@@ -586,12 +624,83 @@
       <span class="c-num" title="${esc(t("col.size"))}">${size}</span>
       <span class="c-num" title="${esc(t("col.time"))}">${time}</span>
       <span class="c-seo">${issueBadge(r)}</span>
+      ${snippetLine(r)}
     </div>`;
   }
 
+  /** A search snippet as HTML: the match highlighted, everything escaped. */
+  const snippetHTML = (sn) => `<span class="s">${esc(sn.before)}<mark>${esc(sn.match)}</mark>${esc(sn.after)}</span>`;
+  const matchCount = (n) => (n === 1 ? t("search.one_match") : t("search.n_matches", { n: fmtNum(n) }));
+  /** Third line of a list entry: the content search matches of the page. */
+  function snippetLine(r) {
+    const m = content.hits?.get(r.url);
+    if (!m) return "";
+    return `<div class="r-snip"><span class="n">${esc(matchCount(m.count))}</span>${m.snippets.map(snippetHTML).join("")}</div>`;
+  }
+
+  // --- content search -------------------------------------------------------
+
+  /** Revision of the searchable content: a new search is due when it changes. */
+  const contentRev = () => `${state.progress?.startedAt || ""}|${state.searchable || 0}|${(state.results || []).filter((r) => !r.pending).length}`;
+
+  async function runSearch() {
+    if (!content.q.trim()) { clearSearch(); return; }
+    content.busy = true;
+    const rev = contentRev();
+    try {
+      const res = await api("POST", "/api/search", { q: content.q, mode: content.mode, regex: content.regex, caseSensitive: content.caseSensitive });
+      content.found = res;
+      content.hits = new Map((res.matches || []).map((m) => [m.url, m]));
+      content.rev = rev;
+      showError("");
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      content.busy = false;
+    }
+    updateExportLinks();
+    renderResults();
+  }
+
+  function clearSearch() {
+    Object.assign(content, { q: "", found: null, hits: null, rev: "" });
+    $("#content-search").q.value = "";
+    updateExportLinks();
+  }
+
+  /** Search form, the summary line below it; re-runs the search when the results changed. */
+  function renderSearch() {
+    const form = $("#content-search");
+    if (document.activeElement !== form.q) form.q.value = content.q;
+    form.mode.value = content.mode;
+    form.regex.checked = content.regex;
+    form.caseSensitive.checked = content.caseSensitive;
+    form.classList.toggle("active", !!content.hits);
+    $("#search-clear").hidden = !content.found;
+    const line = $("#search-info");
+    const f = content.found;
+    line.hidden = !f;
+    if (f) {
+      const searched = fmtNum(f.searched);
+      line.classList.toggle("warn", !f.searched);
+      line.textContent = !f.searched ? t("search.unavailable")
+        : !f.matches.length ? t("search.no_matches", { searched })
+          : t("search.summary", { pages: fmtNum(f.matches.length), n: fmtNum(f.total), searched });
+    }
+    if (f && !content.busy && content.rev !== contentRev()) runSearch();
+  }
+
+  $("#content-search").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const form = e.target;
+    Object.assign(content, { q: form.q.value, mode: form.mode.value, regex: form.regex.checked, caseSensitive: form.caseSensitive.checked });
+    runSearch();
+  });
+  $("#search-clear").addEventListener("click", () => { clearSearch(); renderResults(); });
+
   $("#sort-key").addEventListener("change", (e) => {
     ui.sortKey = e.target.value;
-    ui.sortDesc = ["status", "size", "durationMs", "issues", "lastModified"].includes(ui.sortKey); // big numbers and newest first
+    ui.sortDesc = ["status", "size", "durationMs", "issues", "lastModified", "matches"].includes(ui.sortKey); // big numbers and newest first
     save("linkscout.ui", ui);
     renderResults();
   });
@@ -601,12 +710,13 @@
     renderResults();
   });
   $("#f-search").addEventListener("input", (e) => { ui.search = e.target.value; save("linkscout.ui", ui); renderResults(); });
-  for (const [id, key] of [["#f-kind", "kind"], ["#f-status", "status"], ["#f-type", "type"], ["#f-depth", "depth"], ["#f-time", "time"], ["#f-issue", "issue"], ["#f-tlen", "tlen"], ["#f-dlen", "dlen"]]) {
+  for (const [id, key] of [["#f-kind", "kind"], ["#f-status", "status"], ["#f-type", "type"], ["#f-depth", "depth"], ["#f-time", "time"], ["#f-issue", "issue"], ["#f-tp", "tp"], ["#f-tlen", "tlen"], ["#f-dlen", "dlen"]]) {
     $(id).addEventListener("change", (e) => { ui[key] = e.target.value; save("linkscout.ui", ui); renderResults(); });
   }
   $("#f-reset").addEventListener("click", () => {
-    Object.assign(ui, { search: "", kind: "", status: "", type: "", depth: "", time: "", issue: "", tlen: "", dlen: "" });
+    Object.assign(ui, { search: "", kind: "", status: "", type: "", depth: "", time: "", issue: "", tp: "", tlen: "", dlen: "" });
     save("linkscout.ui", ui);
+    clearSearch();
     renderResults();
   });
 
@@ -774,6 +884,15 @@
     });
   }
 
+  /** The external resources of a page, grouped by host with its category. */
+  function tpDetail(r, link) {
+    return tpHosts(r).map((h) => {
+      const urls = r.seo.thirdParty.filter((u) => { try { return new URL(u).hostname.toLowerCase() === h; } catch { return false; } });
+      const cat = tpCategory(h);
+      return `<div class="tp-host"><b>${esc(h)}</b><span class="tp-cat ${esc(cat)}">${esc(t(`tp.cat.${cat}`))}</span><ul>${urls.map((u) => `<li>${link(u)}</li>`).join("")}</ul></div>`;
+    }).join("");
+  }
+
   function openDetail(url) {
     const r = (state.results || []).find((x) => x.url === url);
     if (!r) return;
@@ -797,6 +916,11 @@
       r.inSitemap && [t("detail.in_sitemap"), esc(t("misc.yes"))],
       r.robotsBlocked && [t("detail.robots_blocked"), esc(t("misc.yes"))],
       ...seoRows(r, link),
+      r.seo?.thirdParty?.length && [t("tp.detail"), tpDetail(r, link)],
+      content.hits?.has(r.url) && [t("search.detail"), (() => {
+        const m = content.hits.get(r.url);
+        return `${esc(matchCount(m.count))}<ul>${m.snippets.map((sn) => `<li>${snippetHTML(sn)}</li>`).join("")}</ul>`;
+      })()],
     ].filter(Boolean);
     $("#detail-title").innerHTML = link(r.url);
     $("#detail-body").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("");
@@ -1028,7 +1152,8 @@
         <div class="panel"><h3>${esc(t("stats.by_code"))}</h3>${bars(s.byCode, (k) => k, codeColor, fmtNum, (k) => ({ status: `c${k}` }))}</div>
         <div class="panel"><h3>${esc(t("stats.by_type"))}</h3>${bars(typeItems, (k) => k, null, fmtNum, mimeDrill)}</div>
         <div class="panel"><h3 class="with-total">${esc(t("stats.size_by_type"))}${info(t("stats.size_explain"))}<span>${esc(t("stats.size_total", { size: fmtBytes(s.totalBytes) }))}</span></h3>${bars(sizeItems, (k) => k, null, fmtBytes, mimeDrill)}</div>
-      </div>`;
+      </div>
+      ${tpPanel()}`;
 
     // Columns are drawn at the real width of their box (crisp text, no scaling).
     drawCharts = () => {
@@ -1044,6 +1169,30 @@
     drawCharts();
   }
 
+  /**
+   * External services of the analysed pages (state.thirdParty, computed by
+   * crawler.NewThirdParty): host, category and the number of pages that
+   * load something from it. Not affected by the external links checkbox –
+   * the pages are internal ones.
+   */
+  function tpPanel() {
+    const tp = state.thirdParty;
+    if (!tp) return "";
+    const hosts = tp.hosts || [];
+    const maxV = Math.max(1, ...hosts.map((h) => h.pages));
+    const nPages = (n) => (n === 1 ? t("tp.one_page") : t("tp.n_pages", { n: fmtNum(n) }));
+    const rows = hosts.map((h) => `<button type="button" class="bar-row" ${drillAttr({ tp: h.host })} data-tip="${esc(nPages(h.pages))}" data-tip-label="${esc(h.host)}">
+      <span class="lbl">${esc(h.host)}<span class="tp-cat ${esc(h.category)}">${esc(t(`tp.cat.${h.category}`))}</span></span>
+      <span class="track"><span class="val" style="display:block;width:${(h.pages / maxV) * 100}%;${h.category === "own" ? "background:var(--muted)" : ""}"></span></span>
+      <span class="n">${esc(fmtNum(h.pages))}</span></button>`).join("");
+    const total = t("tp.summary", { n: fmtNum(tp.services), pages: fmtNum(tp.pagesWith), total: fmtNum(tp.pages) });
+    return `<div class="panel tp-panel">
+      <h3 class="with-total">${esc(t("tp.title"))}${info(t("tp.explain"))}<span class="tp-total" role="button" tabindex="0" ${drillAttr({ tp: "*" })}>${esc(total)}</span></h3>
+      <p class="sub">${esc(t("tp.sub"))}</p>
+      ${hosts.length ? `<div class="bars">${rows}</div>` : `<p class="muted">${esc(t("tp.none"))}</p>`}
+    </div>`;
+  }
+
   let drawCharts = () => {};
   let resizeTimer;
   window.addEventListener("resize", () => {
@@ -1054,7 +1203,8 @@
   /** Open the results list with the criteria of a clicked statistic. */
   function drillDown(el) {
     const { sort, ...filters } = JSON.parse(el.dataset.drill);
-    Object.assign(ui, { search: "", kind: "", status: "", type: "", depth: "", time: "", issue: "", tlen: "", dlen: "" }, filters);
+    Object.assign(ui, { search: "", kind: "", status: "", type: "", depth: "", time: "", issue: "", tp: "", tlen: "", dlen: "" }, filters);
+    clearSearch(); // the list shows exactly the clicked figure
     if (sort) { ui.sortKey = sort; ui.sortDesc = true; }
     tip.hidden = true;
     setTab("results");
@@ -1297,6 +1447,14 @@
     for (const a of $$("a[href^='/api/export']", exportMenu)) {
       const u = new URL(a.getAttribute("href"), location.href);
       if (ui.statsExternal) u.searchParams.set("external", "1"); else u.searchParams.delete("external");
+      // the reports include the content search the list shows
+      for (const k of ["q", "mode", "regex", "case"]) u.searchParams.delete(k);
+      if (content.found) {
+        u.searchParams.set("q", content.found.query.q);
+        u.searchParams.set("mode", content.found.query.mode);
+        if (content.found.query.regex) u.searchParams.set("regex", "1");
+        if (content.found.query.caseSensitive) u.searchParams.set("case", "1");
+      }
       a.setAttribute("href", u.pathname + u.search);
     }
   }

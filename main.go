@@ -65,6 +65,9 @@ type options struct {
 	recheckAll   bool
 	failOnBroken bool
 	compare      string
+	search       string
+	searchRegex  bool
+	searchSource bool
 	mirrorDir    string
 	mirrorExt    bool
 	mirrorFiles  bool
@@ -168,7 +171,7 @@ func run(args []string) int {
 			Robots: o.mirrorRobots, Sitemap: !o.noSitemap, Fresh: o.mirrorFresh,
 			MaxFileSize: int64(max(o.maxFileSize, 0)) << 20,
 		})
-	case o.report != "" || o.recheck != "":
+	case o.report != "" || o.recheck != "" || o.search != "":
 		return runHeadless(ctx, lang, o, cfg)
 	default:
 		return runUI(ctx, lang, o, cfg)
@@ -219,6 +222,9 @@ func parseFlags(args []string, lang i18n.Lang) (*options, *flag.FlagSet) {
 	fs.BoolVar(&o.recheckAll, "recheck-all", false, T("flag.recheck_all"))
 	fs.BoolVar(&o.failOnBroken, "fail-on-broken", false, T("flag.fail_on_broken"))
 	fs.StringVar(&o.compare, "compare", "", T("flag.compare"))
+	fs.StringVar(&o.search, "search", "", T("flag.search"))
+	fs.BoolVar(&o.searchRegex, "search-regex", false, T("flag.search_regex"))
+	fs.BoolVar(&o.searchSource, "search-source", false, T("flag.search_source"))
 	fs.StringVar(&o.mirrorDir, "mirror", "", T("flag.mirror"))
 	fs.BoolVar(&o.mirrorExt, "mirror-external", false, T("flag.mirror_external"))
 	fs.BoolVar(&o.mirrorFiles, "mirror-external-files", false, T("flag.mirror_external_files"))
@@ -417,15 +423,34 @@ func runHeadless(ctx context.Context, lang i18n.Lang, o *options, cfg crawler.Co
 			len(cmp.Added), len(cmp.Removed), len(cmp.Status), len(cmp.NewIssues))
 	}
 
+	if o.search != "" {
+		q := crawler.SearchQuery{Query: o.search, Regex: o.searchRegex}
+		if o.searchSource {
+			q.Mode = crawler.SearchSource
+		}
+		res, err := c.Search(q)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		rep.Search = &res
+		fmt.Fprintf(os.Stderr, T("cli.search_summary")+"\n", o.search, len(res.Matches), res.Total, res.Searched)
+		for _, m := range res.Matches {
+			fmt.Fprintf(os.Stderr, "  %s (%d)\n", m.URL, m.Count)
+		}
+	}
+
 	out := o.report
 	if out == "" {
 		out = o.recheck // re-check without -report updates the file in place
 	}
-	if err := writeReport(out, rep, lang); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+	if out != "" { // -search alone only prints the matches
+		if err := writeReport(out, rep, lang); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		fmt.Fprintf(os.Stderr, T("cli.report_written")+"\n", out)
 	}
-	fmt.Fprintf(os.Stderr, T("cli.report_written")+"\n", out)
 	if o.failOnBroken && (s.Broken > 0 || s.Errors > 0) {
 		return 3
 	}
@@ -482,7 +507,7 @@ func writeReport(path string, rep crawler.Report, lang i18n.Lang) error {
 	var buf bytes.Buffer
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".csv":
-		if err := crawler.WriteCSV(&buf, rep.Results); err != nil {
+		if err := crawler.WriteCSV(&buf, rep.Results, rep.Search); err != nil {
 			return err
 		}
 	case ".html", ".htm":

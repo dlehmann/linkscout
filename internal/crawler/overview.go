@@ -11,7 +11,8 @@ import (
 // status share, SEO health, title and description lengths, response times,
 // clicks from the start page, status codes, MIME types and size by MIME
 // type. The page computes the same figures in app.js (summarize,
-// renderStats, seoCharts); keep both in step. The reports (JSON, HTML, PDF)
+// renderStats, seoCharts; the external services come from the state);
+// keep both in step. The reports (JSON, HTML, PDF)
 // use this one.
 type Overview struct {
 	// ExternalIncluded tells whether links to pages on other websites (kind
@@ -37,6 +38,9 @@ type Overview struct {
 	// listed in the sitemap, see NotLinked).
 	Clicks []Count      `json:"clicks"`
 	SEO    *SEOOverview `json:"seo,omitempty"` // nil when no page was analysed
+	// ThirdParty lists the external services of the analysed pages (added
+	// in 1.5.0; nil when no page was analysed).
+	ThirdParty *ThirdPartyOverview `json:"thirdParty,omitempty"`
 }
 
 // ByteCount is a labelled size in bytes.
@@ -231,6 +235,7 @@ func NewOverview(rs []Result, includeExternal bool) Overview {
 	}
 
 	o.SEO = seoOverview(rs)
+	o.ThirdParty = NewThirdParty(rs)
 	return o
 }
 

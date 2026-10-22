@@ -266,7 +266,7 @@ func TestCompareAndCSV(t *testing.T) {
 
 	var buf bytes.Buffer
 	Analyze(cur)
-	if err := WriteCSV(&buf, cur); err != nil {
+	if err := WriteCSV(&buf, cur, nil); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := csv.NewReader(&buf).ReadAll()

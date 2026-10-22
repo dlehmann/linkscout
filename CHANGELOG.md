@@ -9,6 +9,19 @@ section of a version as release notes.
 
 ### Added
 
+- **External services** in the overview: which hosts the pages load fonts,
+  scripts, images, videos or maps from (Google Fonts, Google Tag Manager,
+  YouTube …), grouped by category, with the number of pages – for example
+  for the privacy policy. A click on a host lists its pages; the results
+  list has a filter "External service", the details of a page list the
+  resources. Also in the HTML, PDF, CSV and JSON exports. Only what is in
+  the HTML is visible; what scripts load later is not.
+- **Content search** in the results list: search the visible text or the
+  HTML source of all checked pages for a text or a regular expression. The
+  list shows only the pages with matches, each with the matches in context;
+  the exports include them. Headless: `-search`, `-search-regex`,
+  `-search-source`. Imported reports contain no page content – check the
+  site again to search it.
 - **Save offline – update and continue**: downloading into a directory that
   already holds a copy only fetches what changed (the server is asked with
   ETag / Last-Modified) and removes the files that are no longer on the

@@ -359,3 +359,16 @@ func TestFactsLimits(t *testing.T) {
 		t.Errorf("IDs not capped: %d", len(doc.Facts.IDs))
 	}
 }
+
+// The visible text leaves out <head>, scripts, styles and templates; block
+// elements separate words, inline elements do not; &nbsp; becomes a plain
+// space, so a search for "Tel. 0123" finds it.
+func TestParseHTMLText(t *testing.T) {
+	base, _ := url.Parse("https://e.com/")
+	doc := ParseHTML([]byte(`<html><head><title>T</title><style>p{}</style></head><body>
+		<p>Hello <b>Wo</b>rld</p><p>Second</p><script>var x = "hidden"</script>
+		<noscript>no js</noscript><template>tpl</template><div>Tel.&nbsp;0123</div></body></html>`), base)
+	if want := "Hello World Second Tel. 0123"; doc.Text != want {
+		t.Errorf("text = %q, want %q", doc.Text, want)
+	}
+}

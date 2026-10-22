@@ -29,6 +29,10 @@ the checked site.
 - Find **SEO problems**: missing or duplicate titles and descriptions,
   `noindex` pages, broken canonicals, orphan pages from the sitemap, broken
   anchors, images without alt text, hreflang mistakes and more
+- See which **external services** the pages load – fonts, statistics,
+  videos, maps, CDNs … – for example for the privacy policy
+- **Search the content** of all pages: an old phone number, the former
+  company name, a forgotten tracking code
 - **Compare** two runs: what is new, what is gone, what broke, what got fixed
 - Generate a **sitemap.xml** for Google from the pages that are really there
 - **Re-check** only the URLs that failed after fixing them, without crawling the whole site again
@@ -41,8 +45,8 @@ the checked site.
   without `www.`, http or https) counts as internal; sub-domains are external
 - **Overview:** key figures and charts – status of all URLs, SEO health of
   the pages, length of titles and meta descriptions, response times, clicks
-  from the start page, status codes, MIME types and size by MIME type.
-  External links can be included or left out (default: left out). Clicking a
+  from the start page, status codes, MIME types, size by MIME type and the
+  external services the pages load. External links can be included or left out (default: left out). Clicking a
   figure, bar or column opens the results list filtered to exactly those URLs
 - **48 SEO checks**, rated as errors, warnings and notices – indexability
   (`noindex`, canonicals, robots.txt), titles, meta descriptions and headings
@@ -67,6 +71,16 @@ the checked site.
   sortable, with full-text search and a filter for every column. Long URLs are
   shortened at the start, the full URL is in the tooltip. A click on a row
   shows details such as the redirect chain and the pages that link to the URL
+- **External services:** which hosts the pages load scripts, stylesheets,
+  fonts, images, iframes and videos from, grouped as fonts, statistics,
+  video, maps, advertising, social media, cookie consent, captcha and CDN,
+  with the number of pages per host and a filter in the results list. Only
+  what is in the HTML counts – what a script loads later needs a browser
+- **Content search** in the results list: plain text or regular expression,
+  in the visible text or the HTML source, with or without case. The matches
+  filter the list, every page shows its matches in context, and the exports
+  include them. The page content is kept in memory for checks run since
+  LinkScout was started; imported reports contain none
 - **Behaves like Firefox:** Firefox User-Agent and Accept headers, cookies and
   Firefox's referrer policy (`strict-origin-when-cross-origin`). The
   User-Agent can be changed in the UI; a fixed Referer can be set on the
@@ -221,6 +235,9 @@ linkscout -report report.html https://example.com
 # later: re-check only the URLs that were not 200 and update the report
 linkscout -recheck report.json
 
+# list the pages that still mention the old e-mail address
+linkscout -search "info@old-company.example" https://example.com
+
 # check again and compare with the earlier report
 linkscout -report new.json -compare report.json https://example.com
 
@@ -245,6 +262,8 @@ Useful options (`linkscout -help` lists all of them):
 | `-no-external` | do not check external links |
 | `-no-sitemap` | do not check (with `-mirror`: do not download) the URLs listed in sitemap.xml |
 | `-compare FILE` | compare the results with an earlier JSON report |
+| `-search TEXT` | list the pages whose visible text contains TEXT (case-insensitive; added to the report) |
+| `-search-regex` / `-search-source` | `-search` is a regular expression / looks in the HTML source |
 | `-mirror-external` | with `-mirror`: also download CDN resources |
 | `-mirror-external-files` | with `-mirror`: also download files linked on other websites (PDFs, images, archives) |
 | `-mirror-rules "-/private/* +*.pdf"` | with `-mirror`: include (`+`) or exclude (`-`) URLs; `*` matches anything, patterns starting with `/` apply to the path |

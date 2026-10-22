@@ -175,6 +175,21 @@ details.advanced summary { cursor: pointer; color: var(--muted); font-weight: 60
   background-color: color-mix(in srgb, var(--accent) 10%, var(--surface));
 }
 .filters #f-reset { margin-bottom: 1px; }
+/* Content search above the filters; its matches are a third line of an
+   entry (.r-snip), the match itself is <mark>. */
+.content-search { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; margin-bottom: 8px; }
+.content-search label.check { padding-bottom: 9px; }
+.content-search input[type="search"] { width: 100%; }
+.content-search.active input[type="search"] {
+  border-color: var(--accent);
+  background-color: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+.search-info { margin: 0 0 12px; font-size: 13px; color: var(--muted); }
+.search-info.warn { color: var(--warn); }
+.r-snip { grid-column: 1 / -1; min-width: 0; color: var(--text); line-height: 1.5; }
+.r-snip .n { color: var(--accent); font-weight: 600; margin-right: 8px; white-space: nowrap; }
+.r-snip .s + .s::before { content: "·"; color: var(--muted); margin: 0 8px; }
+mark { background: color-mix(in srgb, var(--warn) 30%, transparent); color: inherit; border-radius: 2px; padding: 0 1px; }
 .muted { color: var(--muted); }
 
 /* Two-line results list (see resultRow() in app.js). */
@@ -287,7 +302,7 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 0 24
   /* phones: no columns, the values wrap below the URL */
   #results-list { display: block; }
   .result { display: flex; flex-wrap: wrap; gap: 4px 12px; }
-  .r-url, .r-final { flex-basis: 100%; }
+  .r-url, .r-final, .r-snip { flex-basis: 100%; }
   .c-num:empty, .c-type:empty, .c-title:empty { display: none; }
   .filters select { max-width: none; }
   .filters label.filter { flex: 1 1 140px; }
@@ -410,6 +425,17 @@ button.kpi:hover, button.kpi:focus-visible { border-color: var(--accent); backgr
 .bars .bar-row:hover, .bars .bar-row:focus-visible { background: color-mix(in srgb, var(--accent) 12%, transparent); filter: none; }
 .bars .bar-row:hover .lbl, .bars .bar-row:focus-visible .lbl { color: var(--accent); }
 .bars .bar-row .lbl { word-break: break-all; }
+/* external services: the category after the host name */
+.tp-cat {
+  display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 4px;
+  font-size: 11px; font-weight: 600; white-space: nowrap; word-break: normal;
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.tp-cat.own { color: var(--muted); background: color-mix(in srgb, var(--muted) 12%, transparent); }
+.grid + .tp-panel { margin-top: 18px; }
+.tp-total { cursor: pointer; }
+.tp-total:hover, .tp-total:focus-visible { color: var(--accent) !important; text-decoration: underline; }
+.tp-host + .tp-host { margin-top: 8px; }
 
 /* --- SEO severities (results list, details, overview) ---------------------- */
 /* Severity colours reuse the status palette: error = red, warning = amber,

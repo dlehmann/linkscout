@@ -28,6 +28,7 @@ type reportView struct {
 	Created  string
 	StartURL string
 	Scope    string // whether external links are counted in the figures
+	Search   string // the content search of the export, "" without
 	KPIs     []rKPI
 	Rows     [][]rChart // charts, row by row (1–3 per row)
 	Details  []rDetail
@@ -81,6 +82,9 @@ type rLine struct {
 	Tone   string // colour of the text
 	Badge  string // severity label after the text (issue headings)
 	Gap    bool   // space above (between two issues)
+	// Snippet is a search match; Text holds it as plain text with the
+	// match in quotes (PDF), the HTML report highlights Snippet.Match.
+	Snippet *crawler.Snippet
 }
 
 // reportOptions tune the report content.
@@ -117,7 +121,17 @@ func newReportView(rep crawler.Report, lang i18n.Lang, opt reportOptions) report
 		{fmtMs(ov.AvgMs), f.t("stats.avg_time"), ""},
 	}
 	v.Rows = overviewCharts(ov, f)
-	d := detailBuilder{f: f, results: results, byURL: map[string]*crawler.Result{}}
+	d := detailBuilder{f: f, results: results, byURL: map[string]*crawler.Result{},
+		hosts: ov.ThirdParty.HostCategories(), matches: map[string]crawler.SearchMatch{}}
+	if sr := rep.Search; sr != nil {
+		mode := f.t("search.mode_" + sr.Query.Mode)
+		v.Search = strings.NewReplacer("%q%", f.quote(sr.Query.Query), "%mode%", mode,
+			"%pages%", f.num(len(sr.Matches)), "%n%", f.num(sr.Total), "%searched%", f.num(sr.Searched)).Replace(f.t("report.search"))
+		d.search = true
+		for _, m := range sr.Matches {
+			d.matches[m.URL] = m
+		}
+	}
 	for i := range results {
 		d.byURL[results[i].URL] = &results[i]
 	}
@@ -208,7 +222,21 @@ func overviewCharts(ov crawler.Overview, f formatter) [][]rChart {
 	for _, c := range ov.SizeByMime {
 		sizes.Items = append(sizes.Items, rItem{Label: mimeLabel(c.Key), N: float64(c.Bytes), Value: f.bytes(c.Bytes), Tone: "accent"})
 	}
-	return append(rows, []rChart{codes, types, sizes})
+	rows = append(rows, []rChart{codes, types, sizes})
+	if tp := ov.ThirdParty; tp != nil {
+		c := rChart{Kind: "bars", Title: f.t("tp.title"), Sub: f.t("tp.sub"), Empty: f.t("tp.none"),
+			Total: strings.NewReplacer("%n%", f.num(tp.Services), "%pages%", f.num(tp.PagesWith),
+				"%total%", f.num(tp.Pages)).Replace(f.t("tp.summary"))}
+		for _, h := range tp.Hosts {
+			tone := "accent"
+			if h.Category == crawler.TPOwn {
+				tone = "muted"
+			}
+			c.Items = append(c.Items, rItem{Label: h.Host + " · " + f.t("tp.cat."+h.Category), N: float64(h.Pages), Value: f.num(h.Pages), Tone: tone})
+		}
+		rows = append(rows, []rChart{c})
+	}
+	return rows
 }
 
 // classTone is the colour of a status class (the status palette of the UI).
@@ -291,6 +319,9 @@ type detailBuilder struct {
 	f       formatter
 	results []crawler.Result
 	byURL   map[string]*crawler.Result
+	hosts   map[string]string // category of every external service host
+	search  bool              // the report has a content search
+	matches map[string]crawler.SearchMatch
 }
 
 func text(s string) []rLine { return []rLine{{Text: s}} }
@@ -421,6 +452,42 @@ func (d detailBuilder) detail(r crawler.Result) rDetail {
 		}
 		if r.Depth == 0 && !p.CertNotAfter.IsZero() {
 			add("detail.cert", text(f.date(p.CertNotAfter)))
+		}
+		if len(p.ThirdParty) > 0 {
+			add("tp.detail", d.thirdParty(p.ThirdParty))
+		}
+	}
+	if m, ok := d.matches[r.URL]; ok {
+		lines := text(f.tv("search.n_matches", "n", f.num(m.Count)))
+		for _, sn := range m.Snippets {
+			lines = append(lines, rLine{Text: sn.Before + f.quote(sn.Match) + sn.After, Bullet: "•", Snippet: &sn})
+		}
+		add("search.detail", lines)
+	}
+	return out
+}
+
+// thirdParty groups the external resources of a page by host (the
+// category after the host), like the detail dialog of the UI.
+func (d detailBuilder) thirdParty(urls []string) []rLine {
+	var hosts []string
+	byHost := map[string][]string{}
+	for _, raw := range urls {
+		h := raw
+		if u, err := url.Parse(raw); err == nil && u.Hostname() != "" {
+			h = strings.ToLower(u.Hostname())
+		}
+		if byHost[h] == nil {
+			hosts = append(hosts, h)
+		}
+		byHost[h] = append(byHost[h], raw)
+	}
+	var out []rLine
+	for i, h := range hosts {
+		cat := cmp.Or(d.hosts[h], crawler.TPOther)
+		out = append(out, rLine{Text: h, Bold: true, Badge: d.f.t("tp.cat." + cat), Gap: i > 0})
+		for _, u := range byHost[h] {
+			out = append(out, rLine{Text: u, Link: true, Bullet: "•", Indent: 1})
 		}
 	}
 	return out

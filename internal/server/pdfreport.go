@@ -57,9 +57,11 @@ func WritePDFReport(w io.Writer, rep crawler.Report, lang i18n.Lang, external bo
 	}
 	d.y += 16
 	d.text(left, d.y, 9, false, pdfMuted, v.Created)
-	if v.Scope != "" {
-		d.y += 12
-		d.text(left, d.y, 9, false, pdfMuted, v.Scope)
+	for _, line := range []string{v.Scope, v.Search} {
+		if line != "" {
+			d.y += 12
+			d.text(left, d.y, 9, false, pdfMuted, fit(line, right-left, 9, false, false))
+		}
 	}
 
 	// Key figures as a row of boxes.

@@ -145,7 +145,10 @@ type Report struct {
 	// Overview holds the figures of the overview page (added in 1.3.0;
 	// readers of older reports compute it with NewOverview).
 	Overview *Overview `json:"overview,omitempty"`
-	Results  []Result  `json:"results"`
+	// Search holds the result of the content search the export was made
+	// with (added in 1.5.0, only then).
+	Search  *SearchResult `json:"search,omitempty"`
+	Results []Result      `json:"results"`
 }
 
 // NewReport builds a report from the current state of c.

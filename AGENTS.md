@@ -36,7 +36,8 @@ main.go                     CLI flags, UI / headless / mirror modes
 internal/i18n               locale detection; one translation table per language (lang_*.go)
 internal/fetch              HTTP client: Firefox headers, referer policy, redirects, timeouts
 internal/links              pure helpers: normalise, extract links/titles, classify types
-internal/crawler            crawl + check, re-check failed, stats, JSON report format
+internal/crawler            crawl + check, re-check failed, stats, JSON report format,
+                            external services (thirdparty.go), content search (search.go)
 internal/mirror             offline copy (download, path mapping, link rewriting, ZIP),
                             rules.go (+/- patterns), scripts.go (URLs in JS),
                             state.go (manifest, update, continue)
@@ -437,6 +438,43 @@ port. The user's own install is `make install PREFIX=$HOME/.local` (no sudo).
   (`fetch.Response.LastModified`); it is shown in the list, the details,
   the reports and the exports.
 
+## External services and content search
+
+Both live on the existing pages (on request: no new nav item) – a tile of
+the overview, a filter and a search form in the results list, sections of
+the detail dialog and of the reports.
+
+- **External services** (`crawler/thirdparty.go`): `PageSEO.ThirdParty`
+  holds the embedded resources (`links.Link.Embedded`) of an analysed page
+  that are not on the same site (max. 200). `TPCategory` classifies a URL
+  by a host-suffix table (`tpRules`, optional path prefix: `google.com/maps`
+  vs. `/recaptcha`); sub-domains of the site are `own` (shown grey, last,
+  not counted as services, not matched by the "any" filter).
+  `NewThirdParty` aggregates per host (pages, distinct URLs); the server
+  sends it as `state.thirdParty`, so `app.js` has no copy of the table, and
+  `Overview.ThirdParty` carries it into the reports. Information only – it
+  is not an SEO issue (on request). Filter values: host, `*` (any), `-`
+  (none); the tile drills with `tp`. Only the HTML is read – what scripts
+  load later is invisible, the tooltip says so.
+- **Content search** (`crawler/search.go`): the crawler keeps the HTML and
+  the visible text (`links.Document.Text`: no `<head>`, scripts, styles,
+  templates, iframes; block elements separate words, inline ones do not;
+  whitespace incl. `&nbsp;` collapsed) of every analysed page, flate
+  compressed, in `Crawler.content` – not in the JSON report; `Start` and
+  `Load` clear it, so imported reports cannot be searched (the UI shows a
+  hint, `state.searchable` = pages with content). `Search` compiles plain
+  text with `QuoteMeta`, adds `(?i)` without `CaseSensitive` (Go regexp is
+  linear time, user patterns are safe), counts up to 1000 matches per page,
+  skips empty matches and returns 3 snippets with 60 characters of context.
+  `POST /api/search`; the UI keeps the result in memory (`content`), it
+  filters the list like the other filters, adds a third line per entry and
+  a sort key, and is re-run when the results change (`contentRev`).
+  Drill-downs and "reset filters" clear it. Exports take `q`, `mode`,
+  `regex=1`, `case=1` (`updateExportLinks`) and add `Report.Search`, the
+  CSV columns `search_matches`/`search_snippets` and a detail section;
+  headless `-search`, `-search-regex`, `-search-source` (case-insensitive;
+  `-search` alone only prints the pages).
+
 ## Reports and exports
 
 - JSON (`crawler.Report`, incl. `overview`) and CSV (`crawler.CSVHeader`:
@@ -461,7 +499,8 @@ port. The user's own install is `make install PREFIX=$HOME/.local` (no sudo).
 ## JSON report format
 
 `crawler.Report`: `generator, startUrl, createdAt, userAgent, referer, stats,
-issues[], results[]` – each result is `crawler.Result` (see JSON tags; the SEO
+issues[], overview, search, results[]` (`search` only when exported with a
+content search) – each result is `crawler.Result` (see JSON tags; the SEO
 fields `inSitemap, robotsBlocked, seo, issues` are optional). The same format
 is accepted by `POST /api/import`, `POST /api/compare`, `-recheck` and
 `-compare`, so keep it backwards compatible (only add fields).

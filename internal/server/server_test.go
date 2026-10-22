@@ -855,3 +855,82 @@ func TestSitemapEndpoint(t *testing.T) {
 		t.Errorf("sitemap HTML: %s", body)
 	}
 }
+
+// The content search over the API, its hint without content, and the
+// exports with a search and the external services.
+func TestSearchAndThirdPartyExports(t *testing.T) {
+	site := http.NewServeMux()
+	site.HandleFunc("/{$}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<title>Start</title><script src="https://www.googletagmanager.com/gtag/js"></script><p>Call 0123-456 now</p>`)
+	})
+	srv := httptest.NewServer(site)
+	defer srv.Close()
+	s, ui := newUI(t, i18n.DE)
+	if resp, _ := do(t, "POST", ui.URL+"/api/check", CheckRequest{URL: srv.URL}); resp.StatusCode != http.StatusAccepted {
+		t.Fatal(resp.Status)
+	}
+	waitIdle(t, s)
+
+	var st State
+	_, b := do(t, "GET", ui.URL+"/api/state", nil)
+	json.Unmarshal(b, &st)
+	if st.Searchable != 1 || st.ThirdParty == nil || len(st.ThirdParty.Hosts) != 1 ||
+		st.ThirdParty.Hosts[0].Host != "www.googletagmanager.com" || st.ThirdParty.Hosts[0].Category != crawler.TPAnalytics {
+		t.Fatalf("state = %+v", st.ThirdParty)
+	}
+
+	var res crawler.SearchResult
+	resp, b := do(t, "POST", ui.URL+"/api/search", crawler.SearchQuery{Query: "0123-456"})
+	json.Unmarshal(b, &res)
+	if resp.StatusCode != 200 || res.Total != 1 || res.Matches[0].Snippets[0].Match != "0123-456" {
+		t.Fatalf("search = %s %s", resp.Status, b)
+	}
+	if resp, b := do(t, "POST", ui.URL+"/api/search", crawler.SearchQuery{Query: "("}); resp.StatusCode != 200 || !strings.Contains(string(b), `"total": 0`) {
+		t.Errorf("plain text with special characters: %s %s", resp.Status, b)
+	}
+	if resp, b := do(t, "POST", ui.URL+"/api/search", crawler.SearchQuery{Query: "(", Regex: true}); resp.StatusCode != 400 || !strings.Contains(string(b), "Ungültige Suche") {
+		t.Errorf("invalid regex: %s %s", resp.Status, b)
+	}
+	if resp, b := do(t, "POST", ui.URL+"/api/search", crawler.SearchQuery{}); resp.StatusCode != 400 || !strings.Contains(string(b), "Suchtext") {
+		t.Errorf("empty search: %s %s", resp.Status, b)
+	}
+
+	q := "&q=0123-456&mode=text"
+	_, b = do(t, "GET", ui.URL+"/api/export?format=json"+q, nil)
+	var rep crawler.Report
+	json.Unmarshal(b, &rep)
+	if rep.Search == nil || rep.Search.Total != 1 || rep.Overview == nil || rep.Overview.ThirdParty == nil || rep.Overview.ThirdParty.Services != 1 {
+		t.Errorf("json report: search %+v, overview %+v", rep.Search, rep.Overview)
+	}
+	_, b = do(t, "GET", ui.URL+"/api/export?format=csv"+q, nil)
+	if csv := string(b); !strings.Contains(csv, "third_party,search_matches,search_snippets") || !strings.Contains(csv, "googletagmanager.com/gtag/js,1,Call 0123-456 now") {
+		t.Errorf("csv = %s", csv)
+	}
+	_, b = do(t, "GET", ui.URL+"/api/export?format=csv", nil)
+	if strings.Contains(string(b), "search_matches") {
+		t.Error("csv without search has search columns")
+	}
+	_, b = do(t, "GET", ui.URL+"/api/export?format=html"+q, nil)
+	html := string(b)
+	for _, want := range []string{"Externe Dienste", "www.googletagmanager.com · Statistik", "Inhaltssuche nach „0123-456“ (Sichtbarer Text)",
+		"Call <mark>0123-456</mark> now", "Suchtreffer", "Dienste: 1 · auf 1 von 1 Seiten"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("html report lacks %q", want)
+		}
+	}
+	if resp, _ := do(t, "GET", ui.URL+"/api/export?format=pdf"+q, nil); resp.StatusCode != 200 {
+		t.Errorf("pdf: %s", resp.Status)
+	}
+	if resp, _ := do(t, "GET", ui.URL+"/api/export?format=pdf&q=(&regex=1", nil); resp.StatusCode != 400 {
+		t.Errorf("export with invalid search: %s", resp.Status)
+	}
+
+	// An imported report has no page content: nothing is searched.
+	do(t, "POST", ui.URL+"/api/import", rep)
+	_, b = do(t, "POST", ui.URL+"/api/search", crawler.SearchQuery{Query: "0123"})
+	json.Unmarshal(b, &res)
+	if res.Searched != 0 || len(res.Matches) != 0 {
+		t.Errorf("search after import = %+v", res)
+	}
+}

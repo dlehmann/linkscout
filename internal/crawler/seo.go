@@ -187,6 +187,7 @@ func pageSEO(doc links.Document, resp fetch.Response, page *url.URL) *PageSEO {
 		p.ContentHash = hex.EncodeToString(h[:])
 	}
 	p.Security = missingSecurityHeaders(resp.Header, page.Scheme == "https")
+	p.ThirdParty = thirdParty(doc, page)
 	return p
 }
 

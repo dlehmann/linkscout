@@ -91,6 +91,7 @@ type PageSEO struct {
 	ContentHash  string            `json:"contentHash,omitempty"`     // SHA-1 of the HTML
 	Security     []string          `json:"securityMissing,omitempty"` // missing security headers
 	CertNotAfter time.Time         `json:"certNotAfter,omitempty"`
+	ThirdParty   []string          `json:"thirdParty,omitempty"` // embedded resources from other hosts, see NewThirdParty
 }
 
 // OK reports whether the URL answered with status 200 (after redirects).
@@ -138,13 +139,14 @@ type Crawler struct {
 	wg       sync.WaitGroup
 	sem      chan struct{}
 	ctx      context.Context
-	visited  map[string]bool // URLs processed in the current run
-	robots   *robots.Robots  // rules of the site's robots.txt (loaded by Start)
+	visited  map[string]bool        // URLs processed in the current run
+	robots   *robots.Robots         // rules of the site's robots.txt (loaded by Start)
+	content  map[string]pageContent // compressed HTML and text of the analysed pages, see Search
 }
 
 // New creates an idle crawler.
 func New() *Crawler {
-	return &Crawler{results: map[string]*Result{}}
+	return &Crawler{results: map[string]*Result{}, content: map[string]pageContent{}}
 }
 
 // Start begins a full crawl with cfg in the background. Previous results are
@@ -172,6 +174,7 @@ func (c *Crawler) Start(cfg Config) error {
 	c.results = map[string]*Result{}
 	c.order = nil
 	c.robots = nil
+	c.content = map[string]pageContent{}
 	c.beginLocked("all")
 	// robots.txt is loaded first (it marks the URLs), then the crawl begins.
 	c.wg.Add(1)
@@ -345,6 +348,7 @@ func (c *Crawler) Load(cfg Config, results []Result) error {
 	c.start, _ = url.Parse(norm)
 	c.results = map[string]*Result{}
 	c.order = nil
+	c.content = map[string]pageContent{} // reports carry no page content
 	c.progress = Progress{StartURL: norm}
 	for i := range results {
 		r := results[i]
@@ -512,8 +516,10 @@ func (c *Crawler) work(u string) {
 	// A URL that redirects is not a page of its own: its facts belong to the
 	// target, which is checked as a URL of its own (see below).
 	var seo *PageSEO
+	var content *pageContent
 	if isHTML && r.Kind == KindInternal && len(resp.Redirects) == 0 && finalURL != nil && links.SameSite(start, finalURL) {
 		seo = pageSEO(doc, resp, finalURL)
+		content = &pageContent{html: compress(resp.Body), text: compress([]byte(doc.Text))}
 	}
 
 	c.mu.Lock()
@@ -554,6 +560,11 @@ func (c *Crawler) work(u string) {
 		res.Title = doc.Title
 	}
 	res.SEO = seo
+	if content != nil {
+		c.content[u] = *content
+	} else {
+		delete(c.content, u)
+	}
 	// An extension-less URL may turn out to be a file (e.g. /download?id=3).
 	if res.Kind != KindFile && links.IsFile(res.Category) && res.Category != links.CatData {
 		res.Kind = KindFile

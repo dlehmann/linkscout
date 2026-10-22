@@ -85,6 +85,7 @@ svg .zone { fill: var(--ok); fill-opacity: .1; }
 dl { display: grid; grid-template-columns: minmax(120px, 200px) 1fr; gap: 6px 16px; margin: 0; font-size: 13px; }
 dt { color: var(--muted); } dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .ln { display: flex; gap: 6px; } .ln.gap { margin-top: 10px; } .ln .b { flex: none; color: var(--muted); }
+mark { background: color-mix(in srgb, var(--warn) 30%, transparent); color: inherit; border-radius: 2px; }
 .badge { font-size: 11px; font-weight: 600; border: 1px solid currentColor; border-radius: 4px; padding: 0 5px; margin-left: 6px; }
 .t-ok { color: var(--ok); } .t-info { color: var(--info); } .t-bad { color: var(--bad); } .t-warn { color: var(--warn); } .t-err { color: var(--err); } .t-muted { color: var(--muted); }
 .f-ok { background: var(--ok); } .f-info { background: var(--info); } .f-bad { background: var(--bad); } .f-warn { background: var(--warn); } .f-err { background: var(--err); } .f-accent { background: var(--accent); } .f-muted { background: var(--muted); }
@@ -96,6 +97,7 @@ dt { color: var(--muted); } dd { margin: 0; min-width: 0; overflow-wrap: anywher
 <h1>{{.Title}}</h1>
 <p class="muted">{{.Created}}</p>
 {{with .Scope}}<p class="scope">{{.}}</p>{{end}}
+{{with .Search}}<p class="scope">{{.}}</p>{{end}}
 <div class="kpis">{{range .KPIs}}<div class="kpi"><b{{with .Tone}} class="t-{{.}}"{{end}}>{{.Value}}</b><span>{{.Label}}</span></div>{{end}}</div>
 {{range .Rows}}<div class="row n{{len .}}">{{range .}}
 <div class="panel">
@@ -117,7 +119,7 @@ dt { color: var(--muted); } dd { margin: 0; min-width: 0; overflow-wrap: anywher
 <h2>{{t .Lang "report.results"}} <span class="muted">({{len .Details}})</span></h2>
 {{range .Details}}<section class="url">
 <h3>{{if href .URL}}<a href="{{.URL}}">{{.URL}}</a>{{else}}{{.URL}}{{end}}</h3>
-<dl>{{range .Fields}}<dt>{{.Label}}</dt><dd>{{range .Lines}}<div class="ln{{if .Gap}} gap{{end}}"{{if .Indent}} style="padding-left:{{indent .Indent}}"{{end}}>{{with .Bullet}}<span class="b">{{.}}</span>{{end}}<span{{if .Muted}} class="muted"{{else if .Tone}} class="t-{{.Tone}}"{{end}}>{{with .Prefix}}<span class="muted">{{.}}</span> {{end}}{{if .Bold}}<b>{{end}}{{if and .Link (href .Text)}}<a href="{{.Text}}">{{.Text}}</a>{{else}}{{.Text}}{{end}}{{if .Bold}}</b>{{end}}{{with .Badge}}<span class="badge">{{.}}</span>{{end}}</span></div>{{end}}</dd>{{end}}</dl>
+<dl>{{range .Fields}}<dt>{{.Label}}</dt><dd>{{range .Lines}}<div class="ln{{if .Gap}} gap{{end}}"{{if .Indent}} style="padding-left:{{indent .Indent}}"{{end}}>{{with .Bullet}}<span class="b">{{.}}</span>{{end}}<span{{if .Muted}} class="muted"{{else if .Tone}} class="t-{{.Tone}}"{{end}}>{{with .Prefix}}<span class="muted">{{.}}</span> {{end}}{{if .Bold}}<b>{{end}}{{if .Snippet}}{{.Snippet.Before}}<mark>{{.Snippet.Match}}</mark>{{.Snippet.After}}{{else if and .Link (href .Text)}}<a href="{{.Text}}">{{.Text}}</a>{{else}}{{.Text}}{{end}}{{if .Bold}}</b>{{end}}{{with .Badge}}<span class="badge">{{.}}</span>{{end}}</span></div>{{end}}</dd>{{end}}</dl>
 </section>
 {{end}}
 </body>

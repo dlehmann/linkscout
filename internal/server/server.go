@@ -10,7 +10,9 @@
 //	GET  /api/state         progress, results, statistics, mirror progress
 //	POST /api/check         start a check {mode:"all"|"failed", url, referer, …}
 //	POST /api/stop          stop the running check
-//	GET  /api/export        download the report (?format=json|csv|html|pdf, default json)
+//	GET  /api/export        download the report (?format=json|csv|html|pdf, default json;
+//	                        q, mode, regex=1, case=1 add a content search)
+//	POST /api/search        search the content of the checked pages {q, mode, regex, caseSensitive}
 //	POST /api/compare       compare the results with an earlier JSON report (body)
 //	POST /api/import        load a JSON report (to re-check it later)
 //	POST /api/mirror        add an offline copy to the list and start it {url, outDir, external, …}
@@ -130,6 +132,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/stop", s.handleStop)
 	mux.HandleFunc("GET /api/export", s.handleExport)
 	mux.HandleFunc("GET /api/sitemap", s.handleSitemap)
+	mux.HandleFunc("POST /api/search", s.handleSearch)
 	mux.HandleFunc("POST /api/import", s.handleImport)
 	mux.HandleFunc("POST /api/compare", s.handleCompare)
 	mux.HandleFunc("POST /api/mirror", s.handleMirror)
@@ -180,9 +183,13 @@ type State struct {
 	Progress crawler.Progress     `json:"progress"`
 	Results  []crawler.Result     `json:"results"`
 	Stats    crawler.Stats        `json:"stats"`
-	Issues   []crawler.IssueCount `json:"issues"`  // SEO issues of the results
-	Mirrors  []JobView            `json:"mirrors"` // offline copy list
-	Config   crawler.Config       `json:"config"`
+	Issues   []crawler.IssueCount `json:"issues"` // SEO issues of the results
+	// ThirdParty are the external services of the analysed pages (nil
+	// without any), Searchable the pages the content search can read.
+	ThirdParty *crawler.ThirdPartyOverview `json:"thirdParty,omitempty"`
+	Searchable int                         `json:"searchable"`
+	Mirrors    []JobView                   `json:"mirrors"` // offline copy list
+	Config     crawler.Config              `json:"config"`
 }
 
 // state collects the complete UI state.
@@ -191,12 +198,14 @@ func (s *Server) state() State {
 	cfg := s.crawler.Config()
 	issues := crawler.Analyze(rs)
 	return State{
-		Issues:   issues,
-		Progress: s.crawler.Progress(),
-		Results:  rs,
-		Stats:    crawler.Summarize(rs),
-		Mirrors:  s.mirrors.views(),
-		Config:   cfg,
+		Issues:     issues,
+		ThirdParty: crawler.NewThirdParty(rs),
+		Searchable: s.crawler.Searchable(),
+		Progress:   s.crawler.Progress(),
+		Results:    rs,
+		Stats:      crawler.Summarize(rs),
+		Mirrors:    s.mirrors.views(),
+		Config:     cfg,
 	}
 }
 
@@ -337,6 +346,16 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	if format != "csv" && format != "html" && format != "pdf" {
 		format = "json"
 	}
+	// q=…: the report includes the content search the list shows
+	if q := r.URL.Query(); q.Get("q") != "" {
+		res, err := s.crawler.Search(crawler.SearchQuery{Query: q.Get("q"), Mode: q.Get("mode"),
+			Regex: q.Get("regex") == "1", CaseSensitive: q.Get("case") == "1"})
+		if err != nil {
+			s.fail(w, http.StatusBadRequest, s.searchError(err))
+			return
+		}
+		rep.Search = &res
+	}
 	name := "linkscout-report." + format
 	if u, err := url.Parse(rep.StartURL); err == nil && u.Host != "" {
 		name = fmt.Sprintf("linkscout-%s-%s.%s", sanitizeName(u.Host), time.Now().Format("20060102-150405"), format)
@@ -345,7 +364,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	switch format {
 	case "csv":
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-		crawler.WriteCSV(w, rep.Results)
+		crawler.WriteCSV(w, rep.Results, rep.Search)
 	case "html":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		WriteHTMLReport(w, rep, s.opts.Lang, external)
@@ -355,6 +374,30 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusOK, rep)
 	}
+}
+
+// handleSearch searches the content of the checked pages (POST /api/search,
+// body crawler.SearchQuery) and answers with a crawler.SearchResult.
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	var q crawler.SearchQuery
+	if err := decode(r, &q); err != nil {
+		s.fail(w, http.StatusBadRequest, err)
+		return
+	}
+	res, err := s.crawler.Search(q)
+	if err != nil {
+		s.fail(w, http.StatusBadRequest, s.searchError(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// searchError translates the errors of crawler.Search.
+func (s *Server) searchError(err error) error {
+	if errors.Is(err, crawler.ErrEmptyQuery) {
+		return errors.New(i18n.T(s.opts.Lang, "search.empty"))
+	}
+	return errors.New(strings.ReplaceAll(i18n.T(s.opts.Lang, "search.invalid"), "%error%", err.Error()))
 }
 
 // handleCompare compares the current results with an earlier report sent

@@ -99,6 +99,9 @@ type Document struct {
 	Base  *url.URL // effective base URL (honours <base href>)
 	Links []Link
 	Facts Facts // what the SEO checks need, collected in the same pass
+	// Text is the visible text of the page (without <head>, scripts, styles
+	// and templates), whitespace collapsed; the content search reads it.
+	Text string
 }
 
 // Facts are the SEO relevant properties of an HTML page.
@@ -167,9 +170,18 @@ func ParseHTML(body []byte, pageURL *url.URL) Document {
 	}
 
 	f := &doc.Facts
-	var walk func(n *html.Node)
-	walk = func(n *html.Node) {
+	var text strings.Builder
+	var walk func(n *html.Node, hidden bool)
+	walk = func(n *html.Node, hidden bool) {
+		if n.Type == html.TextNode && !hidden {
+			text.WriteString(n.Data)
+		}
+		block := n.Type == html.ElementNode && !inlineElements[n.DataAtom]
+		if block && !hidden {
+			text.WriteByte(' ') // "<p>a</p><p>b</p>" is "a b", "<b>a</b>b" stays "ab"
+		}
 		if n.Type == html.ElementNode {
+			hidden = hidden || hiddenElements[n.DataAtom]
 			collectFacts(n, doc.Base, f)
 			switch n.DataAtom {
 			case atom.Title:
@@ -215,11 +227,30 @@ func ParseHTML(body []byte, pageURL *url.URL) Document {
 			}
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
+			walk(c, hidden)
+		}
+		if block && !hidden {
+			text.WriteByte(' ')
 		}
 	}
-	walk(root)
+	walk(root, false)
+	doc.Text = collapseSpace(text.String())
 	return doc
+}
+
+// hiddenElements contain no visible text of the page.
+var hiddenElements = map[atom.Atom]bool{
+	atom.Head: true, atom.Script: true, atom.Style: true, atom.Noscript: true,
+	atom.Template: true, atom.Iframe: true, atom.Object: true,
+}
+
+// inlineElements do not separate words: "<b>Wo</b>rd" is one word.
+var inlineElements = map[atom.Atom]bool{
+	atom.A: true, atom.Abbr: true, atom.B: true, atom.Bdi: true, atom.Bdo: true, atom.Cite: true,
+	atom.Code: true, atom.Data: true, atom.Del: true, atom.Dfn: true, atom.Em: true, atom.Font: true,
+	atom.I: true, atom.Ins: true, atom.Kbd: true, atom.Label: true, atom.Mark: true, atom.Q: true,
+	atom.S: true, atom.Samp: true, atom.Small: true, atom.Span: true, atom.Strong: true, atom.Sub: true,
+	atom.Sup: true, atom.Time: true, atom.U: true, atom.Var: true, atom.Wbr: true,
 }
 
 // addCapped appends v unless the list already holds max entries.

@@ -101,6 +101,22 @@
 
     <!-- Results -->
     <section class="tab-panel" id="tab-results">
+      <!-- content search: runs on the server (POST /api/search), its matches
+           filter the list like the other filters -->
+      <form class="content-search" id="content-search" autocomplete="off">
+        <label class="filter grow"><span data-i18n="search.label"></span><input type="search" name="q" data-i18n-placeholder="search.placeholder" spellcheck="false"></label>
+        <label class="filter"><span data-i18n="search.in"></span>
+          <select name="mode">
+            <option value="text" data-i18n="search.mode_text"></option>
+            <option value="source" data-i18n="search.mode_source"></option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" name="caseSensitive"> <span data-i18n="search.case"></span></label>
+        <label class="check"><input type="checkbox" name="regex"> <span data-i18n="search.regex"></span></label>
+        <button type="submit" data-i18n="search.button"></button>
+        <button type="button" class="ghost small" id="search-clear" data-i18n="search.clear" hidden></button>
+      </form>
+      <p class="search-info" id="search-info" aria-live="polite" hidden></p>
       <!-- every filter has a label; its first option is "All" -->
       <div class="filters">
         <label class="filter search"><span data-i18n="filter.label_search"></span><input type="search" id="f-search" data-i18n-placeholder="filter.search"></label>
@@ -110,6 +126,7 @@
         <label class="filter"><span data-i18n="filter.label_depth"></span><select id="f-depth"></select></label>
         <label class="filter"><span data-i18n="filter.label_time"></span><select id="f-time"></select></label>
         <label class="filter"><span data-i18n="filter.label_issue"></span><select id="f-issue"></select></label>
+        <label class="filter"><span data-i18n="filter.label_tp"></span><select id="f-tp"></select></label>
         <label class="filter"><span data-i18n="filter.label_tlen"></span><select id="f-tlen"></select></label>
         <label class="filter"><span data-i18n="filter.label_dlen"></span><select id="f-dlen"></select></label>
         <button type="button" class="ghost small" id="f-reset" data-i18n="filter.reset"></button>
