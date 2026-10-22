@@ -320,8 +320,8 @@ func init() {
 		"compare.fixed":         "Behobene SEO-Probleme",
 		"compare.none":          "Keine Änderungen.",
 		"compare.summary":       "Vergleich mit dem Bericht vom %date%: %added% neu, %removed% entfallen, %status% mit geändertem Status.",
-		"form.export_json":      "JSON-Bericht",
-		"form.export_csv":       "CSV-Tabelle",
+		"form.export_json":      "JSON-Export",
+		"form.export_csv":       "CSV-Export",
 		"form.export_html":      "HTML-Bericht",
 		"form.export_pdf":       "PDF-Bericht",
 		"col.seo":               "SEO",
@@ -352,7 +352,8 @@ func init() {
 		"detail.jsonld":         "JSON-LD-Blöcke",
 		"report.title":          "LinkScout-Bericht für %url%",
 		"report.created":        "Erstellt am %date% mit %generator%",
-		"report.issues":         "SEO-Probleme",
 		"report.results":        "Alle URLs",
+		"report.scope_external": "Externe Links (Seiten auf anderen Websites) sind in den Zahlen enthalten.",
+		"report.scope_site":     "Die Zahlen lassen die %n% externen Links (Seiten auf anderen Websites) weg; die Liste unten enthält alle URLs.",
 	})
 }

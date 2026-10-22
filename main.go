@@ -459,11 +459,11 @@ func writeReport(path string, rep crawler.Report, lang i18n.Lang) error {
 			return err
 		}
 	case ".html", ".htm":
-		if err := server.WriteHTMLReport(&buf, rep, lang); err != nil {
+		if err := server.WriteHTMLReport(&buf, rep, lang, false); err != nil {
 			return err
 		}
 	case ".pdf":
-		if err := server.WritePDFReport(&buf, rep, lang); err != nil {
+		if err := server.WritePDFReport(&buf, rep, lang, false); err != nil {
 			return err
 		}
 	default:

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -570,7 +571,7 @@ func TestIssueTranslations(t *testing.T) {
 	}
 }
 
-// The state carries the SEO issues, the export offers JSON, CSV and HTML,
+// The state carries the SEO issues, the export offers JSON, CSV, HTML and PDF,
 // and an earlier report can be compared.
 func TestSEOExportAndCompare(t *testing.T) {
 	site := target(t)
@@ -591,11 +592,18 @@ func TestSEOExportAndCompare(t *testing.T) {
 		}
 	}
 	if withIssues == 0 {
-		t.Error("results carry no issues")
+		t.Fatal("results carry no issues")
+	}
+	someIssue := ""
+	for _, r := range st.Results {
+		if len(r.Issues) > 0 {
+			someIssue = r.Issues[0]
+			break
+		}
 	}
 
 	for format, want := range map[string]string{
-		"json": "application/json", "csv": "text/csv", "html": "text/html",
+		"json": "application/json", "csv": "text/csv", "html": "text/html", "pdf": "application/pdf",
 	} {
 		resp, body := do(t, "GET", ui.URL+"/api/export?format="+format, nil)
 		if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), want) ||
@@ -605,7 +613,18 @@ func TestSEOExportAndCompare(t *testing.T) {
 		if format == "html" && (!strings.Contains(string(body), "LinkScout-Bericht") || strings.Contains(string(body), "<script")) {
 			t.Error("HTML report: wrong language or contains scripts")
 		}
-		if format == "csv" && !strings.HasPrefix(string(body), "url,final_url,status") {
+		// the overview charts and the details of every URL with its SEO issues
+		for _, want := range []string{i18n.T(i18n.DE, "stats.chart_status"), i18n.T(i18n.DE, "seo.health"),
+			i18n.T(i18n.DE, "stats.size_by_type"), `<svg class="chart"`, i18n.T(i18n.DE, "detail.found_on"),
+			i18n.T(i18n.DE, "detail.seo"), i18n.T(i18n.DE, "issue."+someIssue+".help")} {
+			if format == "html" && !strings.Contains(string(body), want) && !strings.Contains(string(body), template.HTMLEscapeString(want)) {
+				t.Errorf("HTML report lacks %q", want)
+			}
+		}
+		if format == "json" && !strings.Contains(string(body), `"overview"`) {
+			t.Error("JSON report without overview")
+		}
+		if format == "csv" && !strings.HasPrefix(string(body), "url,final_url,redirects,status") {
 			t.Errorf("CSV header: %.60s", body)
 		}
 	}
@@ -625,7 +644,7 @@ func TestSEOExportAndCompare(t *testing.T) {
 func TestHTMLReportEscapes(t *testing.T) {
 	var buf bytes.Buffer
 	rep := crawler.Report{StartURL: "https://e.com/", Results: []crawler.Result{{URL: "https://e.com/", Status: 200, Title: `<script>alert(1)</script>`}}}
-	if err := WriteHTMLReport(&buf, rep, i18n.EN); err != nil {
+	if err := WriteHTMLReport(&buf, rep, i18n.EN, false); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(buf.String(), "<script>alert") {
@@ -644,7 +663,7 @@ func TestPDFReport(t *testing.T) {
 			MimeType: "text/html", Title: "Größe (Ü) – Test", Issues: []string{"title_missing"}})
 	}
 	var buf bytes.Buffer
-	if err := WritePDFReport(&buf, rep, i18n.DE); err != nil {
+	if err := WritePDFReport(&buf, rep, i18n.DE, false); err != nil {
 		t.Fatal(err)
 	}
 	pdf := buf.String()
@@ -682,7 +701,81 @@ func TestPDFHelpers(t *testing.T) {
 	if got := fit("short", 100, 8, false, false); got != "short" {
 		t.Errorf("fit = %q", got)
 	}
-	if pdfString("a → b ✓") != "a > b ?" {
+	if pdfString("a → b ✓ 👋🏽") != "a > b ? " {
 		t.Errorf("pdfString = %q", pdfString("a → b ✓"))
+	}
+}
+
+func TestFormatter(t *testing.T) {
+	de, en := formatter{i18n.DE}, formatter{i18n.EN}
+	for _, c := range []struct{ got, want string }{
+		{de.num(1234567), "1.234.567"}, {en.num(1234), "1,234"}, {en.num(12), "12"},
+		{de.bytes(1536), "1,5 KiB"}, {en.bytes(500), "500 B"}, {en.bytes(0), "–"},
+		{de.pct(1, 3), "33,3 %"}, {en.pct(1, 2), "50 %"},
+		{de.quote("x"), "„x“"}, {en.quote("x"), "“x”"}, {fmtMs(1500), "1.5 s"},
+	} {
+		if c.got != c.want {
+			t.Errorf("got %q, want %q", c.got, c.want)
+		}
+	}
+}
+
+// Long words (URLs) are broken anywhere, every line fits.
+func TestWrap(t *testing.T) {
+	s := "see https://e.com/" + strings.Repeat("abcdefghij", 20) + " and more words here"
+	lines := wrap(s, 150, 8, false)
+	if len(lines) < 3 || strings.ReplaceAll(strings.Join(lines, ""), " ", "") != strings.ReplaceAll(s, " ", "") {
+		t.Errorf("lines = %q", lines)
+	}
+	for _, l := range lines {
+		if textWidth(l, 8, false) > 150 {
+			t.Errorf("line too wide: %q", l)
+		}
+	}
+}
+
+// The PDF has the overview and a clickable detail view per URL.
+func TestPDFReportDetails(t *testing.T) {
+	rep := crawler.Report{StartURL: "https://e.com/", Results: []crawler.Result{
+		{URL: "https://e.com/", Status: 200, Kind: "internal", Internal: true, SEO: &crawler.PageSEO{Titles: []string{"Hi"}}},
+		{URL: "https://e.com/old", Status: 200, Kind: "internal", Redirects: []string{"https://e.com/old"}, FinalURL: "https://e.com/new", Depth: 1, FoundOn: []string{"https://e.com/"}},
+	}}
+	var buf bytes.Buffer
+	if err := WritePDFReport(&buf, rep, i18n.EN, false); err != nil {
+		t.Fatal(err)
+	}
+	pdf := buf.String()
+	for _, want := range []string{"/URI (https://e.com/new)", "(" + pdfString(i18n.T(i18n.EN, "seo.health")) + ")",
+		"(" + pdfString(i18n.T(i18n.EN, "issue.title_short")) + ")", "(" + pdfString(i18n.T(i18n.EN, "detail.redirects")) + ")"} {
+		if !strings.Contains(pdf, want) {
+			t.Errorf("PDF lacks %s", want)
+		}
+	}
+}
+
+// Long lists are never shortened in the PDF: a bar list longer than a page
+// continues on the next one, every linking page is listed.
+func TestPDFReportLongLists(t *testing.T) {
+	rep := crawler.Report{StartURL: "https://e.com/"}
+	var foundOn []string
+	for i := 0; i < 80; i++ {
+		foundOn = append(foundOn, fmt.Sprintf("https://e.com/from-%d", i))
+	}
+	rep.Results = append(rep.Results, crawler.Result{URL: "https://e.com/", Status: 200, Kind: "internal", FoundOn: foundOn})
+	for i := 0; i < 120; i++ {
+		rep.Results = append(rep.Results, crawler.Result{URL: fmt.Sprintf("https://e.com/f%d", i), Status: 200, Kind: "file", MimeType: fmt.Sprintf("type/x-%d", i)})
+	}
+	var buf bytes.Buffer
+	if err := WritePDFReport(&buf, rep, i18n.EN, false); err != nil {
+		t.Fatal(err)
+	}
+	pdf := buf.String()
+	for _, want := range []string{"(type/x-119)", "(https://e.com/from-79)"} {
+		if !strings.Contains(pdf, want) {
+			t.Errorf("PDF lacks %s", want)
+		}
+	}
+	if n := strings.Count(pdf, "(type/x-77)"); n != 2 { // bar list "by MIME type" and the details
+		t.Errorf("type/x-77 appears %d times, want 2", n)
 	}
 }

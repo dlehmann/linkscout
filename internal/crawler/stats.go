@@ -142,7 +142,10 @@ type Report struct {
 	Referer   string       `json:"referer"` // empty = automatic (Firefox policy)
 	Stats     Stats        `json:"stats"`
 	Issues    []IssueCount `json:"issues,omitempty"` // SEO issues, see Analyze
-	Results   []Result     `json:"results"`
+	// Overview holds the figures of the overview page (added in 1.3.0;
+	// readers of older reports compute it with NewOverview).
+	Overview *Overview `json:"overview,omitempty"`
+	Results  []Result  `json:"results"`
 }
 
 // NewReport builds a report from the current state of c.
@@ -154,7 +157,9 @@ func NewReport(c *Crawler, generator string) Report {
 	if ua == "" {
 		ua = fetch.FirefoxUA
 	}
+	ov := NewOverview(rs, false)
 	return Report{
+		Overview:  &ov,
 		Generator: generator,
 		StartURL:  cfg.StartURL,
 		CreatedAt: time.Now().UTC(),

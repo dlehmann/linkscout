@@ -538,3 +538,20 @@ func uniq(list []string) []string {
 	}
 	return out
 }
+
+// BrokenFragments returns the #fragment links of a page whose target element
+// does not exist (the links behind the fragment_missing issue). lookup
+// finds a result by URL.
+func BrokenFragments(p *PageSEO, lookup func(string) *Result) []string {
+	if p == nil {
+		return nil
+	}
+	var out []string
+	for _, f := range p.Fragments {
+		target, frag, _ := strings.Cut(f, "#")
+		if !fragmentFound(lookup(target), frag) {
+			out = append(out, f)
+		}
+	}
+	return out
+}

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -331,8 +332,15 @@ func TestCompareAndCSV(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != len(cur)+1 || !reflect.DeepEqual(rows[0], CSVHeader) || rows[3][0] != "https://e.com/new" || rows[3][12] != "few_inlinks" {
+	col := func(name string) int { return slices.Index(CSVHeader, name) }
+	if len(rows) != len(cur)+1 || !reflect.DeepEqual(rows[0], CSVHeader) || rows[3][0] != "https://e.com/new" ||
+		rows[3][col("issues")] != "few_inlinks" || rows[3][col("worst_issue")] != SevNotice {
 		t.Errorf("csv = %v", rows)
+	}
+	for i, row := range rows {
+		if len(row) != len(CSVHeader) {
+			t.Errorf("row %d has %d columns, want %d", i, len(row), len(CSVHeader))
+		}
 	}
 }
 

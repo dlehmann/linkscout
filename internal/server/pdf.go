@@ -2,11 +2,11 @@ package server
 
 // A small PDF writer for the report, without external dependencies.
 //
-// It only needs what a table report needs: text in the two standard fonts
+// It only needs what the report needs: text in the two standard fonts
 // Helvetica and Helvetica-Bold (every PDF viewer has them, nothing is
 // embedded), WinAnsi encoding (covers German umlauts, typographic quotes,
-// dashes and the euro sign), filled rectangles and lines, A4 landscape
-// pages with a repeated table header and page numbers.
+// dashes and the euro sign), filled rectangles and lines, clickable links,
+// A4 portrait pages with page numbers.
 
 import (
 	"bytes"
@@ -15,14 +15,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/dlehmann/linkscout/internal/crawler"
-	"github.com/dlehmann/linkscout/internal/i18n"
 )
 
-// Page geometry in PDF points (1/72 inch): A4 landscape.
+// Page geometry in PDF points (1/72 inch): A4 portrait.
 const (
-	pdfW, pdfH = 842.0, 595.0
+	pdfW, pdfH = 595.0, 842.0
 	pdfMargin  = 36.0
 )
 
@@ -42,15 +39,17 @@ var (
 
 // pdfDoc collects the content streams of the pages.
 type pdfDoc struct {
-	pages []*bytes.Buffer
-	cur   *bytes.Buffer
-	y     float64 // current baseline, from the top of the page
-	onNew func()  // called after a page break (repeats table headers)
+	pages  []*bytes.Buffer
+	annots [][]string // link annotations per page
+	cur    *bytes.Buffer
+	y      float64 // current baseline, from the top of the page
+	onNew  func()  // called after a page break (repeats table headers)
 }
 
 func (d *pdfDoc) newPage() {
 	d.cur = &bytes.Buffer{}
 	d.pages = append(d.pages, d.cur)
+	d.annots = append(d.annots, nil)
 	d.y = pdfMargin
 	if d.onNew != nil {
 		d.onNew()
@@ -77,6 +76,18 @@ func (d *pdfDoc) text(x, y, size float64, bold bool, c rgb, s string) {
 // rect fills a rectangle whose top left corner is (x, y).
 func (d *pdfDoc) rect(x, y, w, h float64, c rgb) {
 	fmt.Fprintf(d.cur, "%s %s %s rg %s %s %s %s re f\n", num(c.r), num(c.g), num(c.b), num(x), num(pdfH-y-h), num(w), num(h))
+}
+
+// frame strokes the outline of a rectangle whose top left corner is (x, y).
+func (d *pdfDoc) frame(x, y, w, h float64, c rgb) {
+	fmt.Fprintf(d.cur, "%s %s %s RG 0.75 w %s %s %s %s re S\n", num(c.r), num(c.g), num(c.b), num(x), num(pdfH-y-h), num(w), num(h))
+}
+
+// link makes the area (x, y, w, h) of the current page open uri.
+func (d *pdfDoc) link(x, y, w, h float64, uri string) {
+	n := len(d.pages) - 1
+	d.annots[n] = append(d.annots[n], fmt.Sprintf("<< /Type /Annot /Subtype /Link /Rect [%s %s %s %s] /Border [0 0 0] /A << /S /URI /URI (%s) >> >>",
+		num(x), num(pdfH-y-h), num(x+w), num(pdfH-y), pdfString(uri)))
 }
 
 // hline draws a horizontal hairline at y.
@@ -107,8 +118,12 @@ func (d *pdfDoc) write(w io.Writer, title string) error {
 	obj("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>")
 	obj(fmt.Sprintf("<< /Title (%s) /Producer (LinkScout) /CreationDate (D:%s) >>", pdfString(title), time.Now().UTC().Format("20060102150405Z")))
 	for i, content := range d.pages {
-		obj(fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %s %s] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents %d 0 R >>",
-			num(pdfW), num(pdfH), 7+2*i))
+		annots := ""
+		if len(d.annots[i]) > 0 {
+			annots = " /Annots [" + strings.Join(d.annots[i], " ") + "]"
+		}
+		obj(fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %s %s] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents %d 0 R%s >>",
+			num(pdfW), num(pdfH), 7+2*i, annots))
 		obj(fmt.Sprintf("<< /Length %d >>\nstream\n%sendstream", content.Len(), content.String()))
 	}
 	xref := out.Len()
@@ -133,22 +148,26 @@ var winAnsi = map[rune]byte{
 	'“': 0x93, '”': 0x94, '•': 0x95, '–': 0x96, '—': 0x97, '™': 0x99, '›': 0x9b,
 }
 
+// pdfSymbols replaces characters WinAnsi lacks but the report uses.
+var pdfSymbols = strings.NewReplacer("≤", "<=", "≥", ">=", "→", ">", "↳", ">")
+
 // pdfString encodes s as WinAnsi and escapes it for a PDF string literal.
-// Characters the encoding lacks become "?" (arrows become ">").
+// Characters the encoding lacks become "?" (arrows become ">"), emoji are
+// left out.
 func pdfString(s string) string {
 	var b strings.Builder
-	for _, r := range s {
+	for _, r := range pdfSymbols.Replace(s) {
 		var c byte
 		switch {
 		case r == '(' || r == ')' || r == '\\':
 			b.WriteByte('\\')
 			c = byte(r)
-		case r == '→' || r == '↳':
-			c = '>'
 		case r < 0x20:
 			c = ' '
 		case r < 0x80 || (r >= 0xa0 && r <= 0xff):
 			c = byte(r)
+		case r >= 0x1f000 || r == 0x200d || (r >= 0xfe00 && r <= 0xfe0f):
+			continue // emoji (and their joiners and variation selectors) are left out
 		default:
 			var ok bool
 			if c, ok = winAnsi[r]; !ok {
@@ -179,7 +198,7 @@ var helvetica = [...]int{
 // wider; characters outside ASCII use the width of a typical lower-case letter.
 func textWidth(s string, size float64, bold bool) float64 {
 	w := 0
-	for _, r := range s {
+	for _, r := range pdfSymbols.Replace(s) {
 		if r >= 32 && r <= 126 {
 			w += helvetica[r-32]
 		} else {
@@ -217,145 +236,4 @@ func fit(s string, width, size float64, bold, fromStart bool) string {
 		}
 	}
 	return "…"
-}
-
-// statusColor returns the colour of a status code (the status palette of the UI).
-func statusColor(status int) rgb {
-	switch {
-	case status >= 200 && status < 300:
-		return pdfOK
-	case status >= 300 && status < 400:
-		return pdfInfo
-	case status >= 500:
-		return pdfWarn
-	default:
-		return pdfBad
-	}
-}
-
-func severityColor(sev string) rgb {
-	switch sev {
-	case crawler.SevError:
-		return pdfBad
-	case crawler.SevWarning:
-		return pdfWarn
-	}
-	return pdfInfo
-}
-
-// WritePDFReport renders rep as PDF (A4 landscape) in the given language:
-// title, key figures, SEO issues and the table of all URLs.
-func WritePDFReport(w io.Writer, rep crawler.Report, lang i18n.Lang) error {
-	T := func(k string) string { return i18n.T(lang, k) }
-	d := &pdfDoc{}
-	d.newPage()
-	left, right := pdfMargin, pdfW-pdfMargin
-
-	title := strings.ReplaceAll(T("report.title"), "%url%", rep.StartURL)
-	d.y += 18
-	d.text(left, d.y, 18, true, pdfText, fit(title, right-left, 18, true, false))
-	d.y += 16
-	created := strings.NewReplacer("%date%", rep.CreatedAt.Local().Format(time.DateTime), "%generator%", rep.Generator).Replace(T("report.created"))
-	d.text(left, d.y, 9, false, pdfMuted, created)
-
-	// Key figures as a row of boxes.
-	d.y += 16
-	figures := []struct {
-		label string
-		value int
-		c     rgb
-	}{
-		{T("stats.total"), rep.Stats.Total, pdfText},
-		{T("stats.ok"), rep.Stats.OK, pdfOK},
-		{T("stats.redirected"), rep.Stats.Redirected, pdfInfo},
-		{T("stats.broken"), rep.Stats.Broken, pdfBad},
-		{T("stats.errors"), rep.Stats.Errors, pdfBad},
-		{T("stats.pages"), rep.Stats.InternalPages, pdfText},
-	}
-	boxW := (right - left - 5*8) / 6
-	for i, f := range figures {
-		x := left + float64(i)*(boxW+8)
-		d.rect(x, d.y, boxW, 40, pdfStripe)
-		d.text(x+8, d.y+20, 16, true, f.c, strconv.Itoa(f.value))
-		d.text(x+8, d.y+33, 8, false, pdfMuted, fit(f.label, boxW-16, 8, false, false))
-	}
-	d.y += 58
-
-	// SEO issues.
-	d.text(left, d.y, 12, true, pdfText, T("report.issues"))
-	d.y += 6
-	if len(rep.Issues) == 0 {
-		d.y += 12
-		d.text(left, d.y, 9, false, pdfMuted, T("seo.none"))
-	}
-	for _, ic := range rep.Issues {
-		d.need(16)
-		d.y += 14
-		d.text(left, d.y, 8, true, severityColor(ic.Severity), T("sev."+ic.Severity))
-		d.text(left+60, d.y, 9, false, pdfText, fit(T("issue."+ic.ID), right-left-110, 9, false, false))
-		count := strconv.Itoa(ic.Count)
-		d.text(right-textWidth(count, 9, false), d.y, 9, false, pdfMuted, count)
-		d.hline(left, right, d.y+4, pdfBorder)
-	}
-	d.y += 24
-
-	// Results table; the header is repeated on every page.
-	cols := []struct {
-		key string
-		x   float64
-	}{{"col.status", left}, {"col.url", left + 46}, {"col.type", left + 400}, {"col.title", left + 510}, {"col.seo", right - 24}}
-	header := func() {
-		d.y += 12
-		for _, c := range cols {
-			label := strings.ToUpper(T(c.key))
-			x := c.x
-			if c.key == "col.seo" { // right-aligned like the counts below it
-				x = right - textWidth(label, 8, true)
-			}
-			d.text(x, d.y, 8, true, pdfMuted, label)
-		}
-		d.hline(left, right, d.y+4, pdfBorder)
-		d.y += 2
-	}
-	d.need(40)
-	d.text(left, d.y, 12, true, pdfText, T("report.results"))
-	d.y += 4
-	header()
-	d.onNew = header
-	for i, r := range rep.Results {
-		d.need(14)
-		d.y += 13
-		if i%2 == 1 {
-			d.rect(left, d.y-9.5, right-left, 13, pdfStripe)
-		}
-		status := "ERR"
-		if r.Status > 0 {
-			status = strconv.Itoa(r.Status)
-		}
-		d.text(cols[0].x, d.y, 8, true, statusColor(r.Status), status)
-		d.text(cols[1].x, d.y, 8, false, pdfText, fit(r.URL, cols[2].x-cols[1].x-8, 8, false, true))
-		mime := r.MimeType
-		if mime == "" {
-			mime = r.Type
-		}
-		d.text(cols[2].x, d.y, 8, false, pdfMuted, fit(mime, cols[3].x-cols[2].x-8, 8, false, false))
-		title := r.Title
-		if title == "" {
-			title = r.Error
-		}
-		d.text(cols[3].x, d.y, 8, false, pdfText, fit(title, cols[4].x-cols[3].x-8, 8, false, false))
-		if n := len(r.Issues); n > 0 {
-			s := strconv.Itoa(n)
-			d.text(right-textWidth(s, 8, true), d.y, 8, true, pdfInfo, s)
-		}
-	}
-
-	// Page numbers ("3 / 12").
-	for i, p := range d.pages {
-		d.cur = p
-		label := fmt.Sprintf("%d / %d", i+1, len(d.pages))
-		d.text(right-textWidth(label, 8, false), pdfH-pdfMargin+4, 8, false, pdfMuted, label)
-		d.text(left, pdfH-pdfMargin+4, 8, false, pdfMuted, fit(rep.StartURL, 400, 8, false, false))
-	}
-	return d.write(w, title)
 }

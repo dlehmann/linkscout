@@ -320,6 +320,13 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	rep := crawler.NewReport(s.crawler, "LinkScout "+s.opts.Version)
 	format := r.URL.Query().Get("format")
+	// external=1: count links to other websites in the figures, like the
+	// overview page does when its checkbox is set
+	external := r.URL.Query().Get("external") == "1"
+	if external {
+		ov := crawler.NewOverview(rep.Results, true)
+		rep.Overview = &ov
+	}
 	if format != "csv" && format != "html" && format != "pdf" {
 		format = "json"
 	}
@@ -334,10 +341,10 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		crawler.WriteCSV(w, rep.Results)
 	case "html":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		WriteHTMLReport(w, rep, s.opts.Lang)
+		WriteHTMLReport(w, rep, s.opts.Lang, external)
 	case "pdf":
 		w.Header().Set("Content-Type", "application/pdf")
-		WritePDFReport(w, rep, s.opts.Lang)
+		WritePDFReport(w, rep, s.opts.Lang, external)
 	default:
 		writeJSON(w, http.StatusOK, rep)
 	}

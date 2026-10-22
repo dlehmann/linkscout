@@ -328,8 +328,8 @@ func init() {
 		"compare.fixed":         "Fixed SEO issues",
 		"compare.none":          "No changes.",
 		"compare.summary":       "Compared with the report of %date%: %added% new, %removed% gone, %status% with changed status.",
-		"form.export_json":      "JSON report",
-		"form.export_csv":       "CSV table",
+		"form.export_json":      "JSON export",
+		"form.export_csv":       "CSV export",
 		"form.export_html":      "HTML report",
 		"form.export_pdf":       "PDF report",
 		"col.seo":               "SEO",
@@ -360,7 +360,8 @@ func init() {
 		"detail.jsonld":         "JSON-LD blocks",
 		"report.title":          "LinkScout report for %url%",
 		"report.created":        "Created %date% with %generator%",
-		"report.issues":         "SEO issues",
 		"report.results":        "All URLs",
+		"report.scope_external": "External links (pages on other websites) are included in the figures.",
+		"report.scope_site":     "The figures leave out the %n% external links (pages on other websites); the list below contains every URL.",
 	})
 }

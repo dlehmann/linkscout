@@ -96,30 +96,64 @@ func minus(a, b []string) []string {
 	return out
 }
 
-// CSVHeader are the columns of WriteCSV.
+// CSVHeader are the columns of WriteCSV: everything a result holds, the
+// SEO facts of a page included (only the element ids of a page are left
+// out, they are just the targets of the anchor check).
 var CSVHeader = []string{
-	"url", "final_url", "status", "error", "kind", "mime_type", "title", "clicks", "size",
-	"duration_ms", "in_sitemap", "robots_blocked", "issues", "found_on",
+	"url", "final_url", "redirects", "status", "error", "kind", "internal", "mime_type",
+	"type", "category", "content_type", "title", "clicks", "size", "duration_ms",
+	"checked_at", "found_on", "in_sitemap", "robots_blocked",
+	"worst_issue", "issues",
+	"seo_titles", "seo_descriptions", "seo_robots", "seo_canonicals", "seo_h1",
+	"seo_headings", "seo_lang", "seo_viewport", "seo_hreflang", "seo_jsonld",
+	"seo_jsonld_errors", "seo_social", "seo_images_no_alt", "seo_mixed_content",
+	"seo_fragment_links", "seo_security_missing", "seo_cert_not_after", "seo_content_hash",
 }
 
-// WriteCSV writes the results as CSV table (one row per URL; issues and the
-// linking pages are separated by spaces). Run Analyze first to fill the
-// issues column.
+// WriteCSV writes the results as CSV table, one row per URL. Columns with
+// several values (redirects, linking pages, issues, titles …) hold one value
+// per line. Run Analyze first to fill the issue columns.
 func WriteCSV(w io.Writer, rs []Result) error {
 	cw := csv.NewWriter(w)
 	if err := cw.Write(CSVHeader); err != nil {
 		return err
 	}
+	lines := func(list []string) string { return strings.Join(list, "\n") }
+	stamp := func(t time.Time) string {
+		if t.IsZero() {
+			return ""
+		}
+		return t.UTC().Format(time.RFC3339)
+	}
 	for _, r := range rs {
-		mime := r.MimeType
-		if mime == "" {
-			mime = r.Type
+		worst := ""
+		if len(r.Issues) > 0 {
+			worst = WorstSeverity(r)
 		}
 		row := []string{
-			r.URL, r.FinalURL, strconv.Itoa(r.Status), r.Error, r.Kind, mime, r.Title,
+			r.URL, r.FinalURL, lines(r.Redirects), strconv.Itoa(r.Status), r.Error, r.Kind,
+			strconv.FormatBool(r.Internal), ResultMime(r), r.Type, r.Category, r.ContentType, r.Title,
 			strconv.Itoa(r.Depth), strconv.FormatInt(r.Size, 10), strconv.FormatInt(r.DurationMs, 10),
+			stamp(r.CheckedAt), lines(r.FoundOn),
 			strconv.FormatBool(r.InSitemap), strconv.FormatBool(r.RobotsBlocked),
-			strings.Join(r.Issues, " "), strings.Join(r.FoundOn, " "),
+			worst, lines(r.Issues),
+		}
+		if p := r.SEO; p != nil {
+			headings := make([]string, len(p.Headings))
+			for i, h := range p.Headings {
+				headings[i] = "h" + strconv.Itoa(h)
+			}
+			hreflang := make([]string, len(p.Hreflang))
+			for i, a := range p.Hreflang {
+				hreflang[i] = a.Lang + " " + a.URL
+			}
+			row = append(row, lines(p.Titles), lines(p.Descriptions), lines(p.Robots), lines(p.Canonicals),
+				lines(p.H1), strings.Join(headings, " "), p.Lang, strconv.FormatBool(p.Viewport),
+				lines(hreflang), strconv.Itoa(p.JSONLD), lines(p.JSONLDErrors), lines(p.Social),
+				lines(p.ImagesNoAlt), lines(p.Mixed), lines(p.Fragments), lines(p.Security),
+				stamp(p.CertNotAfter), p.ContentHash)
+		} else {
+			row = append(row, make([]string, len(CSVHeader)-len(row))...)
 		}
 		if err := cw.Write(row); err != nil {
 			return err

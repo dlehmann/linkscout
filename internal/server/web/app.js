@@ -1033,6 +1033,7 @@
     if (e.target.id !== "stats-external") return;
     ui.statsExternal = e.target.checked;
     save("linkscout.ui", ui);
+    updateExportLinks();
     renderStats();
     $("#stats-external").focus();
   });
@@ -1159,6 +1160,18 @@
 
   // The export menu closes after a choice and when clicking elsewhere.
   const exportMenu = $("#export-menu");
+  /**
+   * The HTML and PDF reports contain the overview figures; they count
+   * external links when the overview does (checkbox "Include external links").
+   */
+  function updateExportLinks() {
+    for (const a of $$("a[href^='/api/export']", exportMenu)) {
+      const u = new URL(a.getAttribute("href"), location.href);
+      if (ui.statsExternal) u.searchParams.set("external", "1"); else u.searchParams.delete("external");
+      a.setAttribute("href", u.pathname + u.search);
+    }
+  }
+  updateExportLinks();
   exportMenu.addEventListener("click", (e) => { if (e.target.closest("a")) exportMenu.open = false; });
   document.addEventListener("click", (e) => { if (!exportMenu.contains(e.target)) exportMenu.open = false; });
 
