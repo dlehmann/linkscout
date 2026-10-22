@@ -88,7 +88,10 @@ the checked site.
   downloads them at the same time. The target directory supports the
   placeholders `<host>`, `<domain>`, `<date>` and `<time>` (default
   `~/Downloads/linkscout/<host>`). A site in a sub-directory, such as
-  `https://user.github.io/project`, ends up directly in the target directory
+  `https://user.github.io/project`, ends up directly in the target directory.
+  Pages with an error status are saved anyway when they have content; the
+  download list marks such entries and lists the affected URLs. Host names
+  with umlauts are converted to Punycode.
 - **English and German** UI, chosen from the system language (`LANG`,
   `LC_ALL`, … and the macOS language settings), English as fallback; more
   languages can be added with a single file (see [AGENTS.md](AGENTS.md)).
@@ -104,11 +107,31 @@ the checked site.
 
 ## Installation
 
-### Download (Linux, macOS)
+### Debian / Ubuntu package
+
+```bash
+# x86_64 – use linkscout-arm64.deb on ARM boards
+curl -LO https://github.com/dlehmann/linkscout/releases/latest/download/linkscout-amd64.deb
+sudo apt install ./linkscout-amd64.deb
+```
+
+### Arch Linux package
+
+```bash
+# x86_64 – use linkscout-aarch64.pkg.tar.zst on Arch Linux ARM
+curl -LO https://github.com/dlehmann/linkscout/releases/latest/download/linkscout-x86_64.pkg.tar.zst
+sudo pacman -U linkscout-x86_64.pkg.tar.zst
+```
+
+Both packages install the binary to `/usr/bin`, the app-menu entry and the
+icon; remove them with `sudo apt remove linkscout` or `sudo pacman -R
+linkscout`.
+
+### Download (other Linux, macOS)
 
 Every [release](https://github.com/dlehmann/linkscout/releases) contains
 ready-made, statically linked binaries for Linux x86_64, Linux arm64 and macOS
-on Apple Silicon, plus `SHA256SUMS`.
+on Apple Silicon, the packages above, plus `SHA256SUMS`.
 
 ```bash
 # Linux x86_64 – use linkscout-linux-arm64.tar.gz on ARM boards

@@ -42,8 +42,10 @@ internal/server             HTTP API + embedded UI (web/index.html, app.js, styl
                             download list of offline copies (mirrorjobs.go)
 internal/desktop            open URLs / folders (xdg-open, gio; open on macOS)
 docs/                       GitHub Pages site (index.html, impressum.html) + screenshots
-.github/workflows           ci.yml (tests on Linux + macOS), release.yml (tag → release)
-packaging/                  .desktop launcher + icon (installed by `make install`)
+.github/workflows           ci.yml (tests on Linux + macOS), release.yml (tag → release),
+                            packages.yml (.deb + Arch packages, called by release.yml)
+packaging/                  .desktop launcher + icon (installed by `make install`),
+                            nfpm.yaml (package definition)
 ```
 
 ## Build / test
@@ -70,15 +72,32 @@ make release    # dist/linkscout-{linux-amd64,linux-arm64,darwin-arm64}
 - `git tag v1.2.3 && git push origin v1.2.3` starts `.github/workflows/release.yml`:
   checks, `make release`, archives `linkscout-<os>-<arch>.tar.gz` (names
   without version so `releases/latest/download/...` links stay valid;
-  binary + README + LICENSE, Linux also `packaging/`), `SHA256SUMS`, a smoke
+  binary + README + LICENSE, Linux also `packaging/`), the packages of
+  `packages.yml` (see below), `SHA256SUMS` over all files, a smoke
   test of the macOS binary on a macOS runner, then `gh release create` with
   the section of the version in `CHANGELOG.md` as notes (generated notes
   when it is missing) – add the section before tagging. Only tags matching
   `v<major>.<minor>.<patch>` trigger it.
+- **Packages** (`.github/workflows/packages.yml`, `packaging/nfpm.yaml`):
+  nfpm (pinned in `NFPM_VERSION`, only a CI tool) turns the static Linux
+  binaries into `linkscout-{amd64,arm64}.deb` and
+  `linkscout-{x86_64,aarch64}.pkg.tar.zst` (names without version for the
+  `releases/latest/download/…` links on the website), with the binary in
+  `/usr/bin`, desktop file, icon, README and licence. The x86_64 packages
+  are installed once in `debian:trixie` and `archlinux` containers before
+  the release is published. The workflow can also be run by hand (artifact
+  "packages"); between tags the version is `1.2.3+r4.gabc1234`
+  (`version_schema: none`, nfpm's semver handling mangles it for Arch).
+  nfpm does not expand variables in `src`, so the binary is copied to
+  `dist/pkg/linkscout` first. Not in an apt/pacman repository – updates
+  mean installing the new package. An AUR `PKGBUILD` is still open.
 - The project page is served by GitHub Pages from `docs/` on `main`
   (`docs/.nojekyll`: plain files, no Jekyll). It is English; the link to
   „Impressum & Datenschutz“ and that page are German. No external resources
-  (fonts, scripts) – the privacy text promises that.
+  (fonts, scripts) – the privacy text promises that. The only script is
+  the inline one at the end of `index.html` that adds a "Copy" button to
+  every `<pre>` (Clipboard API, `execCommand` fallback, else it selects the
+  text).
 - Screenshots in `docs/screenshots/*-{light,dark}.webp` were taken with
   headless Chrome (1280 px wide, English UI, check of dlehmann.github.io).
   Retake them when the UI changes noticeably (details in the checklist).
@@ -135,7 +154,8 @@ Work through it completely – a release is not done when the tag is pushed.
 8. **Publish**: commit, `git push origin main`, then
    `git tag -a vx.y.z -m "LinkScout x.y.z" && git push origin vx.y.z`.
    Wait for the CI and Release workflows (`gh run watch`), then check the
-   release: three archives plus `SHA256SUMS`, notes = CHANGELOG section;
+   release: three archives, two `.deb`, two `.pkg.tar.zst` plus
+   `SHA256SUMS`, notes = CHANGELOG section;
    download one archive and run `linkscout -version`.
 9. **GitHub Pages** deploys `docs/` with the push; check
    https://dlehmann.github.io/linkscout/ (new texts and images, phone
@@ -233,6 +253,18 @@ have to wait for SSH.
   directories produced by a placeholder get the `-2` suffix. Jobs from the
   UI always download external resources (`MirrorRequest.External` defaults
   to true); the CLI keeps `-mirror-external` (default off).
+  Pages (links, not embedded resources) with a status other than 200 are
+  saved and parsed anyway when they have a body (custom error pages, sites
+  answering everything with 404); every non-200 URL, transport error and
+  too-large file ends up in `Progress.Problems` (`Saved` tells whether a file
+  was written; sorted by URL when the run ends – as a copy, earlier
+  snapshots share the slice). The UI shows them as `<details class="problems">`
+  per list entry (open state kept in `openProblems` across re-renders).
+  Internationalised host names are converted to Punycode (`links.ToASCII`,
+  `links.ASCIIHost` – own RFC 3492 encoder, because `x/net/idna` would pull
+  in `golang.org/x/text`): in the UI URL field on `change`/submit
+  (`asciiURL()`), in `addMirror`, `ExpandMirrorDir` and for every URL the
+  mirror queues. The checker is not affected.
 - **UI**: no build step, vanilla JS. The server injects the initial state into
   `index.html` (placeholder `/*__INITIAL_STATE__*/null`, JSON escaped by
   `json.Marshal` so `</script>` cannot break out). The page polls
@@ -398,7 +430,8 @@ host name → external). Server tests drive the real HTTP API.
 
 - per-host rate limiting (only a global delay exists)
 - persistent history of runs (comparing needs an exported report today)
-- `.deb` / AUR package (`PKGBUILD`) – README currently builds from source
+- AUR package (`PKGBUILD`) and apt/pacman repositories (the release only
+  has the package files)
 - Digest authentication and cookie/form based logins
 - SEO checks that would need a headless browser (JavaScript rendering) or
   external services (Search Console, PageSpeed, backlinks) – deliberately left

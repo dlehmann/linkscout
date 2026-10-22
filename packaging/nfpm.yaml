@@ -1,0 +1,52 @@
+# Debian (.deb) and Arch Linux (.pkg.tar.zst) packages of the release
+# binaries, built with nfpm (https://nfpm.goreleaser.com) by
+# .github/workflows/packages.yml. Locally, after `make release`:
+#
+#   cp dist/linkscout-linux-amd64 dist/pkg/linkscout
+#   VERSION=1.2.3 ARCH=amd64 nfpm package -f packaging/nfpm.yaml -p deb -t dist/
+#   VERSION=1.2.3 ARCH=amd64 nfpm package -f packaging/nfpm.yaml -p archlinux -t dist/
+#
+# ARCH is the Go architecture (amd64, arm64); nfpm maps it to the names of
+# each distribution (x86_64/aarch64 for Arch). nfpm does not expand
+# variables in source paths, hence the fixed dist/pkg/linkscout.
+name: linkscout
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+# Take VERSION literally (1.2.3, or 1.2.3+r4.gabc1234 for builds between
+# tags); nfpm's semver parsing would turn pre-releases into odd Arch versions.
+version_schema: none
+release: 1
+section: web
+priority: optional
+maintainer: Dennis Lehmann <mail@dennis-lehmann.de>
+description: |
+  Website link checker with a local web UI
+  Checks every internal, external and file URL of a website, reports SEO
+  issues, builds a sitemap.xml and creates offline copies. Single static
+  binary; starts its interface in the browser.
+vendor: Dennis Lehmann
+homepage: https://dlehmann.github.io/linkscout/
+license: MIT
+
+contents:
+  - src: dist/pkg/linkscout
+    dst: /usr/bin/linkscout
+    file_info:
+      mode: 0755
+  - src: packaging/linkscout.desktop
+    dst: /usr/share/applications/linkscout.desktop
+  - src: packaging/linkscout.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/linkscout.svg
+  - src: README.md
+    dst: /usr/share/doc/linkscout/README.md
+  # Where each distribution expects the licence text.
+  - src: LICENSE
+    dst: /usr/share/doc/linkscout/copyright
+    packager: deb
+  - src: LICENSE
+    dst: /usr/share/licenses/linkscout/LICENSE
+    packager: archlinux
+
+archlinux:
+  packager: Dennis Lehmann <mail@dennis-lehmann.de>

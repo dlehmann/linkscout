@@ -11,8 +11,9 @@
   <meta property="og:description" content="Check every link of a website, find SEO problems and save websites for offline use. Single binary, local web UI.">
   <meta property="og:image" content="https://dlehmann.github.io/linkscout/screenshots/overview-light.webp">
   <!--
-    Project page of LinkScout. Plain HTML and CSS without scripts, fonts or
-    other resources from third-party servers (see impressum.html, privacy).
+    Project page of LinkScout. Plain HTML and CSS without fonts, scripts or
+    other resources from third-party servers (see impressum.html, privacy);
+    the only script is the inline one that adds the copy buttons.
     Light and dark theme follow the visitor's system setting.
   -->
   <style>
@@ -67,6 +68,12 @@
     code { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; font-size: .92em; }
     p code, li code { background: var(--surface-2); padding: 1px 5px; border-radius: 5px; }
     h3.step { font-size: 17px; margin: 22px 0 4px; }
+    /* copy button, added to every code block by the script at the end */
+    .code { position: relative; }
+    .code pre { padding-right: 92px; }
+    .copy { position: absolute; top: 8px; right: 8px; padding: 4px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); font: 600 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; cursor: pointer; }
+    .copy:hover { color: var(--text); }
+    .copy.done { color: var(--ok); border-color: var(--ok); }
 
     footer { margin-top: 56px; padding: 24px 0 40px; border-top: 1px solid var(--border); color: var(--muted); font-size: 14px; }
     footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 22px; }
@@ -191,6 +198,7 @@
           <li><b>Download list:</b> add several websites, each with its own settings, and download them at the same time.</li>
           <li><b>Flexible target folders:</b> placeholders like <code>&lt;host&gt;</code> and <code>&lt;date&gt;</code>, default <code>~/Downloads/linkscout/&lt;host&gt;</code>.</li>
           <li><b>Project sites:</b> a site in a sub-directory (like <code>user.github.io/project</code>) ends up directly in the target folder.</li>
+          <li><b>Error pages included:</b> pages answering 404 or 500 are saved anyway when they have content; the download list marks them and lists every URL with an error.</li>
           <li><b>External resources:</b> images, CSS and scripts from CDNs are included.</li>
         </ul>
       </div>
@@ -208,11 +216,21 @@
       <h2>Install</h2>
       <p class="sub">LinkScout is a single, statically linked binary without dependencies. Start it without arguments and it opens its interface in your browser. The interface is available in English and German and follows your system language.</p>
 
-      <h3 class="step">Linux (x86_64)</h3>
+      <h3 class="step">Debian, Ubuntu (x86_64)</h3>
+      <pre><code>curl -LO https://github.com/dlehmann/linkscout/releases/latest/download/linkscout-amd64.deb
+sudo apt install ./linkscout-amd64.deb</code></pre>
+      <p>The package installs the program, a launcher in the application menu and the icon. For ARM boards (Raspberry Pi 4/5 and others) use <a href="https://github.com/dlehmann/linkscout/releases/latest/download/linkscout-arm64.deb">linkscout-arm64.deb</a>.</p>
+
+      <h3 class="step">Arch Linux (x86_64)</h3>
+      <pre><code>curl -LO https://github.com/dlehmann/linkscout/releases/latest/download/linkscout-x86_64.pkg.tar.zst
+sudo pacman -U linkscout-x86_64.pkg.tar.zst</code></pre>
+      <p>For ARM (Arch Linux ARM) use <a href="https://github.com/dlehmann/linkscout/releases/latest/download/linkscout-aarch64.pkg.tar.zst">linkscout-aarch64.pkg.tar.zst</a>.</p>
+
+      <h3 class="step">Other Linux distributions</h3>
       <pre><code>curl -LO https://github.com/dlehmann/linkscout/releases/latest/download/linkscout-linux-amd64.tar.gz
 tar -xzf linkscout-linux-amd64.tar.gz
 sudo install -m755 linkscout-*/linkscout /usr/local/bin/</code></pre>
-      <p>For ARM boards (Raspberry Pi 4/5 and others) use <a href="https://github.com/dlehmann/linkscout/releases/latest/download/linkscout-linux-arm64.tar.gz">linkscout-linux-arm64.tar.gz</a>.</p>
+      <p>For ARM use <a href="https://github.com/dlehmann/linkscout/releases/latest/download/linkscout-linux-arm64.tar.gz">linkscout-linux-arm64.tar.gz</a>.</p>
 
       <h3 class="step">macOS (Apple Silicon)</h3>
       <pre><code>curl -LO https://github.com/dlehmann/linkscout/releases/latest/download/linkscout-darwin-arm64.tar.gz
@@ -220,7 +238,7 @@ tar -xzf linkscout-darwin-arm64.tar.gz
 xattr -d com.apple.quarantine linkscout-*/linkscout   # the binary is not signed
 sudo install -m755 linkscout-*/linkscout /usr/local/bin/</code></pre>
 
-      <h3 class="step">From source (Arch, Debian, Ubuntu …)</h3>
+      <h3 class="step">From source</h3>
       <pre><code>sudo pacman -S go git            # Arch Linux
 sudo apt install golang-go git   # Debian 13 or newer (needs Go ≥ 1.24)
 
@@ -246,5 +264,50 @@ linkscout -mirror ./example-offline https://example.com # offline copy</code></p
       <a href="impressum.html" lang="de">Impressum &amp; Datenschutz</a>
     </div>
   </footer>
+  <script>
+    // A "Copy" button for every code block. Without JavaScript or clipboard
+    // access the blocks simply stay as they are.
+    // Older or restricted browsers without the Clipboard API.
+    function copyFallback(text) {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+      document.body.append(ta);
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand("copy"); } catch { /* not supported */ }
+      ta.remove();
+      return ok;
+    }
+    for (const pre of document.querySelectorAll("pre")) {
+      const box = document.createElement("div");
+      box.className = "code";
+      pre.replaceWith(box);
+      box.append(pre);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "copy";
+      btn.textContent = "Copy";
+      btn.setAttribute("aria-label", "Copy the commands to the clipboard");
+      btn.addEventListener("click", async () => {
+        const text = pre.innerText.trim() + "\n";
+        let ok = false;
+        try {
+          await navigator.clipboard.writeText(text);
+          ok = true;
+        } catch {
+          ok = copyFallback(text);
+        }
+        if (!ok) { // leave it to the visitor: select the commands
+          getSelection().selectAllChildren(pre);
+        }
+        btn.textContent = ok ? "Copied" : "Press Ctrl+C";
+        btn.classList.toggle("done", ok);
+        setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("done"); }, 2000);
+      });
+      box.append(btn);
+    }
+  </script>
 </body>
 </html>

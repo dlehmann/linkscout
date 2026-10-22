@@ -5,6 +5,34 @@ All notable changes to LinkScout. The format follows
 [Semantic Versioning](https://semver.org/). The release workflow uses the
 section of a version as release notes.
 
+## [1.4.0] - 2026-10-22
+
+### Added
+
+- **Packages for Debian/Ubuntu (`.deb`) and Arch Linux (`.pkg.tar.zst`)**,
+  for x86_64 and arm64, attached to every release; they install the program,
+  the app-menu entry and the icon.
+- The commands on the project page have a **Copy** button.
+- **Save offline**: pages that answer with an error status (404, 410, 500 …)
+  are saved anyway when the server sent content, so custom error pages and
+  sites that answer every page with an error work in the copy. Entries of the
+  download list with such URLs are marked; a click expands the list of these
+  URLs with status or error, whether they were saved and the page that links
+  to them. `-mirror` prints the same list.
+
+### Changed
+
+- **Save offline**: host names with umlauts or other non-ASCII characters
+  (`müller.de`) are converted to Punycode (`xn--mller-kva.de`) right in the
+  URL field, and the `<host>` / `<domain>` placeholders of the target
+  directory use that form too. URLs in the download list are shown readably
+  (`/über-uns` instead of `/%C3%BCber-uns`).
+
+### Fixed
+
+- **Save offline**: on phones the entries of the download list ran past the
+  right edge of the card.
+
 ## [1.3.0] - 2026-10-22
 
 ### Added
@@ -125,6 +153,7 @@ First public release.
 - English and German UI by system language
 - Static binaries for Linux (x86_64, arm64) and macOS (Apple Silicon)
 
+[1.4.0]: https://github.com/dlehmann/linkscout/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/dlehmann/linkscout/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/dlehmann/linkscout/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/dlehmann/linkscout/compare/v1.0.0...v1.1.0

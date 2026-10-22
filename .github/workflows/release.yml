@@ -5,6 +5,7 @@
 # The binaries are statically linked (CGO_ENABLED=0) and cross-compiled on
 # Linux for Linux x86_64, Linux arm64 and macOS Apple Silicon. The macOS
 # binary is then started once on a real Mac before anything is published.
+# packages.yml adds .deb and Arch Linux packages.
 name: Release
 
 on:
@@ -42,7 +43,6 @@ jobs:
             # .../releases/latest/download/linkscout-linux-amd64.tar.gz
             tar -czf "upload/linkscout-$target.tar.gz" "$dir"
           done
-          cd upload && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
           name: release
@@ -62,8 +62,14 @@ jobs:
           tar -xzf linkscout-darwin-arm64.tar.gz
           ./linkscout-*-darwin-arm64/linkscout -version
 
+  # Debian and Arch Linux packages (built and test-installed there).
+  packages:
+    uses: ./.github/workflows/packages.yml
+    with:
+      version: ${{ github.ref_name }}
+
   publish:
-    needs: [build, macos-smoke-test]
+    needs: [build, macos-smoke-test, packages]
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the release
@@ -73,6 +79,12 @@ jobs:
         with:
           name: release
           path: upload
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: upload
+      - name: Checksums
+        run: cd upload && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
       - name: Release notes from CHANGELOG.md
         run: |
           v="${GITHUB_REF_NAME#v}"
