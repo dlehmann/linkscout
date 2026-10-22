@@ -96,6 +96,7 @@ mark { background: color-mix(in srgb, var(--warn) 30%, transparent); color: inhe
 <body>
 <h1>{{.Title}}</h1>
 <p class="muted">{{.Created}}</p>
+{{with .List}}<p class="scope">{{.}}</p>{{end}}
 {{with .Scope}}<p class="scope">{{.}}</p>{{end}}
 {{with .Search}}<p class="scope">{{.}}</p>{{end}}
 <div class="kpis">{{range .KPIs}}<div class="kpi"><b{{with .Tone}} class="t-{{.}}"{{end}}>{{.Value}}</b><span>{{.Label}}</span></div>{{end}}</div>
@@ -116,7 +117,7 @@ mark { background: color-mix(in srgb, var(--warn) 30%, transparent); color: inhe
   {{end}}
 </div>{{end}}
 </div>{{end}}
-<h2>{{t .Lang "report.results"}} <span class="muted">({{len .Details}})</span></h2>
+<h2>{{.Heading}} <span class="muted">({{len .Details}})</span></h2>
 {{range .Details}}<section class="url">
 <h3>{{if href .URL}}<a href="{{.URL}}">{{.URL}}</a>{{else}}{{.URL}}{{end}}</h3>
 <dl>{{range .Fields}}<dt>{{.Label}}</dt><dd>{{range .Lines}}<div class="ln{{if .Gap}} gap{{end}}"{{if .Indent}} style="padding-left:{{indent .Indent}}"{{end}}>{{with .Bullet}}<span class="b">{{.}}</span>{{end}}<span{{if .Muted}} class="muted"{{else if .Tone}} class="t-{{.Tone}}"{{end}}>{{with .Prefix}}<span class="muted">{{.}}</span> {{end}}{{if .Bold}}<b>{{end}}{{if .Snippet}}{{.Snippet.Before}}<mark>{{.Snippet.Match}}</mark>{{.Snippet.After}}{{else if and .Link (href .Text)}}<a href="{{.Text}}">{{.Text}}</a>{{else}}{{.Text}}{{end}}{{if .Bold}}</b>{{end}}{{with .Badge}}<span class="badge">{{.}}</span>{{end}}</span></div>{{end}}</dd>{{end}}</dl>

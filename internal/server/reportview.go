@@ -29,6 +29,8 @@ type reportView struct {
 	StartURL string
 	Scope    string // whether external links are counted in the figures
 	Search   string // the content search of the export, "" without
+	List     string // what a list export holds (filters, sort), "" for a full report
+	Heading  string // heading of the URL details
 	KPIs     []rKPI
 	Rows     [][]rChart // charts, row by row (1–3 per row)
 	Details  []rDetail
@@ -101,15 +103,33 @@ func newReportView(rep crawler.Report, lang i18n.Lang, opt reportOptions) report
 		Title:    strings.ReplaceAll(f.t("report.title"), "%url%", rep.StartURL),
 		Created: strings.NewReplacer("%date%", f.dateTime(rep.CreatedAt),
 			"%generator%", rep.Generator).Replace(f.t("report.created")),
+		Heading: f.t("report.results"),
 	}
-	// The issues decide the SEO health; old reports may lack them.
 	results := slices.Clone(rep.Results)
-	crawler.Analyze(results)
-	ov := crawler.NewOverview(results, opt.External)
-	if ov.ExternalIncluded {
-		v.Scope = f.t("report.scope_external")
-	} else if ov.ExternalCount > 0 {
-		v.Scope = f.tv("report.scope_site", "n", f.num(ov.ExternalCount))
+	var ov crawler.Overview
+	if l := rep.List; l != nil {
+		// A selection of the results list keeps the issues found on the
+		// whole site (see crawler.Report.Select) and counts every listed URL.
+		v.Title = strings.ReplaceAll(f.t("report.list_title"), "%url%", rep.StartURL)
+		v.Heading = f.t("report.list_results")
+		parts := []string{strings.NewReplacer("%n%", f.num(len(results)), "%total%", f.num(l.Total)).Replace(f.t("report.list_scope"))}
+		if l.Filters != "" {
+			parts = append(parts, f.tv("report.list_filters", "filters", l.Filters))
+		}
+		if l.Sort != "" {
+			parts = append(parts, f.tv("report.list_sort", "sort", l.Sort))
+		}
+		v.List = strings.Join(parts, " · ")
+		ov = crawler.NewOverview(results, true)
+	} else {
+		// The issues decide the SEO health; old reports may lack them.
+		crawler.Analyze(results)
+		ov = crawler.NewOverview(results, opt.External)
+		if ov.ExternalIncluded {
+			v.Scope = f.t("report.scope_external")
+		} else if ov.ExternalCount > 0 {
+			v.Scope = f.tv("report.scope_site", "n", f.num(ov.ExternalCount))
+		}
 	}
 	v.KPIs = []rKPI{
 		{f.num(ov.Total), f.t("stats.total"), ""},
@@ -120,7 +140,9 @@ func newReportView(rep crawler.Report, lang i18n.Lang, opt reportOptions) report
 		{f.num(ov.InternalPages), f.t("stats.pages"), ""},
 		{fmtMs(ov.AvgMs), f.t("stats.avg_time"), ""},
 	}
-	v.Rows = overviewCharts(ov, f)
+	if rep.List == nil { // a list export shows the key figures and the details, no charts
+		v.Rows = overviewCharts(ov, f)
+	}
 	d := detailBuilder{f: f, results: results, byURL: map[string]*crawler.Result{},
 		hosts: ov.ThirdParty.HostCategories(), matches: map[string]crawler.SearchMatch{}}
 	if sr := rep.Search; sr != nil {

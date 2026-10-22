@@ -1,9 +1,9 @@
 package crawler
 
 // Content search: the crawler keeps the HTML and the visible text of every
-// analysed page (internal, 200, HTML, no redirect) compressed in memory –
-// not in the JSON report, so imported reports cannot be searched until the
-// pages are checked again.
+// analysed page (internal, 200, HTML, no redirect) compressed in memory. The
+// JSON report carries them (Report.Content), so an imported report can be
+// searched again; reports from before 1.5.0 have none.
 
 import (
 	"bytes"
@@ -92,11 +92,56 @@ func (q SearchQuery) Compile() (*regexp.Regexp, error) {
 	pattern := q.Query
 	if !q.Regex {
 		pattern = regexp.QuoteMeta(pattern)
+	} else if _, err := regexp.Compile(pattern); err != nil {
+		return nil, err // the message quotes the pattern as typed, without (?i)
 	}
 	if !q.CaseSensitive {
 		pattern = "(?i)" + pattern
 	}
 	return regexp.Compile(pattern)
+}
+
+// PageContent is the stored content of one page in the JSON report: the
+// visible text as plain text and the HTML source deflate compressed (raw
+// DEFLATE, RFC 1951; base64 in JSON) – pages are large, the text is what
+// other tools may want to read.
+type PageContent struct {
+	URL  string `json:"url"`
+	Text string `json:"text"`
+	HTML []byte `json:"htmlDeflate,omitempty"`
+}
+
+// Content returns the stored content of every page in discovery order.
+func (c *Crawler) Content() []PageContent {
+	c.mu.Lock()
+	type page struct {
+		url     string
+		content pageContent
+	}
+	pages := make([]page, 0, len(c.content))
+	for _, u := range c.order {
+		if pc, ok := c.content[u]; ok {
+			pages = append(pages, page{u, pc})
+		}
+	}
+	c.mu.Unlock()
+	out := make([]PageContent, 0, len(pages))
+	for _, p := range pages {
+		out = append(out, PageContent{URL: p.url, Text: decompress(p.content.text), HTML: p.content.html})
+	}
+	return out
+}
+
+// LoadContent restores the page content of a report after Load; entries
+// for URLs that are not among the results are ignored.
+func (c *Crawler) LoadContent(pages []PageContent) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, p := range pages {
+		if _, ok := c.results[p.URL]; ok {
+			c.content[p.URL] = pageContent{html: p.HTML, text: compress([]byte(p.Text))}
+		}
+	}
 }
 
 // Searchable returns the number of pages whose content can be searched.

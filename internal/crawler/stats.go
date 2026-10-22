@@ -149,18 +149,24 @@ type Report struct {
 	// with (added in 1.5.0, only then).
 	Search  *SearchResult `json:"search,omitempty"`
 	Results []Result      `json:"results"`
+	// List is set when the report holds only the URLs of the results list
+	// as filtered and sorted in the UI (added in 1.5.0), see Select.
+	List *ListInfo `json:"list,omitempty"`
+	// Content is the text and HTML of the analysed pages for the content
+	// search after an import (added in 1.5.0; JSON exports only).
+	Content []PageContent `json:"content,omitempty"`
 }
 
 // NewReport builds a report from the current state of c.
 func NewReport(c *Crawler, generator string) Report {
 	cfg := c.Config()
-	rs := c.Results()
-	issues := Analyze(rs)
+	rs, issues := c.Analyzed()
 	ua := cfg.Fetch.UserAgent
 	if ua == "" {
 		ua = fetch.FirefoxUA
 	}
-	ov := NewOverview(rs, false)
+	list := c.List()
+	ov := NewOverview(rs, list != nil) // a list counts every listed URL, see Select
 	return Report{
 		Overview:  &ov,
 		Generator: generator,
@@ -171,5 +177,6 @@ func NewReport(c *Crawler, generator string) Report {
 		Stats:     Summarize(rs),
 		Issues:    issues,
 		Results:   rs,
+		List:      list,
 	}
 }

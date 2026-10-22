@@ -36,12 +36,17 @@ type IssueChange struct {
 
 // Compare compares the results of an earlier report with the current ones.
 // The SEO checks of both sides are evaluated freshly, so reports of older
-// LinkScout versions (without issues) can be compared too.
-func Compare(old Report, current []Result) Comparison {
+// LinkScout versions (without issues) can be compared too – except for a
+// list export (Report.List), whose issues were found on the whole site.
+func Compare(old Report, current Report) Comparison {
 	oldRs := append([]Result(nil), old.Results...)
-	curRs := append([]Result(nil), current...)
-	Analyze(oldRs)
-	Analyze(curRs)
+	curRs := append([]Result(nil), current.Results...)
+	if old.List == nil {
+		Analyze(oldRs)
+	}
+	if current.List == nil {
+		Analyze(curRs)
+	}
 	before := make(map[string]*Result, len(oldRs))
 	for i := range oldRs {
 		before[oldRs[i].URL] = &oldRs[i]

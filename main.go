@@ -385,7 +385,8 @@ func runHeadless(ctx context.Context, lang i18n.Lang, o *options, cfg crawler.Co
 		if cfg.StartURL == "" {
 			cfg.StartURL = rep.StartURL
 		}
-		if err = c.Load(cfg, rep.Results); err == nil {
+		// the content of the pages that are not checked again stays searchable
+		if err = c.LoadReport(cfg, rep); err == nil {
 			if o.recheckAll {
 				err = c.Start(cfg)
 			} else {
@@ -409,6 +410,7 @@ func runHeadless(ctx context.Context, lang i18n.Lang, o *options, cfg crawler.Co
 	waitWithProgress(c, T("cli.progress"))
 
 	rep := crawler.NewReport(c, "LinkScout "+version)
+	rep.Content = c.Content() // JSON reports keep the page content for the search
 	s := rep.Stats
 	fmt.Fprintf(os.Stderr, T("cli.summary")+"\n", s.Total, s.OK, s.Redirected, s.Broken, s.Errors)
 
@@ -418,7 +420,7 @@ func runHeadless(ctx context.Context, lang i18n.Lang, o *options, cfg crawler.Co
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
-		cmp := crawler.Compare(old, rep.Results)
+		cmp := crawler.Compare(old, rep)
 		fmt.Fprintf(os.Stderr, T("cli.compare_summary")+"\n", o.compare,
 			len(cmp.Added), len(cmp.Removed), len(cmp.Status), len(cmp.NewIssues))
 	}

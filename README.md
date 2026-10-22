@@ -79,8 +79,8 @@ the checked site.
 - **Content search** in the results list: plain text or regular expression,
   in the visible text or the HTML source, with or without case. The matches
   filter the list, every page shows its matches in context, and the exports
-  include them. The page content is kept in memory for checks run since
-  LinkScout was started; imported reports contain none
+  include them. JSON reports keep the text and HTML of the pages, so an
+  imported report can be searched again
 - **Behaves like Firefox:** Firefox User-Agent and Accept headers, cookies and
   Firefox's referrer policy (`strict-origin-when-cross-origin`). The
   User-Agent can be changed in the UI; a fixed Referer can be set on the
@@ -95,6 +95,9 @@ the checked site.
   a JSON export and a CSV export with all data of every URL, including the
   SEO facts. JSON import; **check again** only the URLs without status 200,
   or everything; **compare** with an earlier report
+- **Export the list:** the results list exactly as filtered and sorted –
+  as CSV and JSON with all data, as a detailed PDF (key figures and details
+  of the listed URLs) or as a summary PDF with one entry per URL
 - **Save offline:** downloads pages, images, CSS, JavaScript, fonts, videos
   and documents (also from CDNs), rewrites the links to relative paths and
   offers the copy as folder or ZIP. A **download list** takes several websites,

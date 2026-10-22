@@ -328,7 +328,11 @@ have to wait for SSH.
   issues are shown per URL (column, filter, details with `issueContext()`). The overview is always enabled (it shows a
   hint until there are results), is the default on a fresh start (no hash)
   and is what the "Website prüfen" nav button opens. German UI texts say
-  "Offline-Kopie" (not "Offline-Abbild").
+  "Offline-Kopie" (not "Offline-Abbild") and address the user with "du"
+  everywhere, also on the website: "Gib eine URL ein", not "Bitte eine URL
+  eingeben" or "Geben Sie …". That includes the validation bubbles of
+  required/url/number fields: the browser's own ones say "Sie", so
+  `validationMessage()` in app.js sets `form.v_*` texts on `invalid`.
 - **Statistics charts** are hand-written inline SVG in `app.js` (no chart
   library, keep it that way): a 100 % share bar of status classes, a response
   time histogram and "clicks from the start page" columns (single colour –
@@ -460,13 +464,19 @@ the detail dialog and of the reports.
   the visible text (`links.Document.Text`: no `<head>`, scripts, styles,
   templates, iframes; block elements separate words, inline ones do not;
   whitespace incl. `&nbsp;` collapsed) of every analysed page, flate
-  compressed, in `Crawler.content` – not in the JSON report; `Start` and
-  `Load` clear it, so imported reports cannot be searched (the UI shows a
-  hint, `state.searchable` = pages with content). `Search` compiles plain
+  compressed, in `Crawler.content`. Only JSON reports carry it
+  (`Report.Content`, filled by the JSON export and the CLI: per page the
+  plain text and the HTML as raw DEFLATE, base64 in JSON – too large
+  otherwise); `/api/import` and `-recheck` restore it with `LoadContent`
+  after `Load`. `/api/state` never contains it. Older reports have none,
+  the UI shows a hint (`state.searchable` = pages with content). `Search` compiles plain
   text with `QuoteMeta`, adds `(?i)` without `CaseSensitive` (Go regexp is
   linear time, user patterns are safe), counts up to 1000 matches per page,
   skips empty matches and returns 3 snippets with 60 characters of context.
-  `POST /api/search`; the UI keeps the result in memory (`content`), it
+  `POST /api/search`, sent while typing (150 ms pause) and when an option
+  changes – there is no search button; only the answer to the latest
+  request counts (`content.seq`), an invalid regex shows below the field.
+  The UI keeps the result in memory (`content`), it
   filters the list like the other filters, adds a third line per entry and
   a sort key, and is re-run when the results change (`contentRev`).
   Drill-downs and "reset filters" clear it. Exports take `q`, `mode`,
@@ -490,6 +500,25 @@ the detail dialog and of the reports.
 - `external=1` on `/api/export` counts external links in the figures; the
   UI sets it from the overview checkbox (`updateExportLinks`). The CLI
   leaves them out, like the UI default.
+- **List export** ("Liste exportieren" above the results list, `POST
+  /api/export/list`): the page sends the URLs of the list in their order
+  (`listRows`, all of them, not only the rendered 5000), the active filters
+  and the sort order as text (`filterText`, `sortText`) and the content
+  search. `crawler.Report.Select` keeps those results in that order and
+  sets `Report.List`; a selection keeps the issues Analyze found on the
+  whole site, so `newReportView` does not analyse it again and counts
+  external links (the filters decided). Formats: `csv`, `json` (a report
+  with `list` and `content`, importable), `pdf` (key figures and details of
+  the selection, no charts – on request), `pdf-summary` (`WritePDFList` in `pdflist.go`: the two
+  lines of `resultRow` plus the search matches). The download goes through
+  `fetch` + blob because it is a POST.
+- **Both JSON exports are one format** and import alike (`/api/import`,
+  `-recheck`, `-compare` via `Crawler.LoadReport` = `Load` +
+  `LoadContent` + list info). An imported list keeps its issues until the
+  next check: `Crawler.Analyzed()` (used by the state, the sitemap and
+  `NewReport`) only counts them while `Crawler.list` is set (`Start`,
+  `RecheckFailed` and `Load` clear it), `NewReport` carries `List` on, and
+  `Compare` does not re-analyse a side with `List`.
 - Reports never shorten a list (on request): every linking page, every
   entry of an issue context and of the bar lists is shown, unlike the
   detail dialog of the UI, which caps issue context lists at 10. In the PDF
@@ -499,9 +528,11 @@ the detail dialog and of the reports.
 ## JSON report format
 
 `crawler.Report`: `generator, startUrl, createdAt, userAgent, referer, stats,
-issues[], overview, search, results[]` (`search` only when exported with a
-content search) – each result is `crawler.Result` (see JSON tags; the SEO
-fields `inSitemap, robotsBlocked, seo, issues` are optional). The same format
+issues[], overview, search, list, results[], content[]` (`search` only when
+exported with a content search, `list` only for a list export, `content` =
+page content for the search)
+– each result is `crawler.Result` (see JSON tags; the SEO fields
+`inSitemap, robotsBlocked, seo, issues` are optional). The same format
 is accepted by `POST /api/import`, `POST /api/compare`, `-recheck` and
 `-compare`, so keep it backwards compatible (only add fields).
 

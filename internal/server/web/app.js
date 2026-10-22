@@ -31,7 +31,7 @@
   );
   // The content search runs on the server; `found` holds its result
   // (crawler.SearchResult) and filters the list until it is cleared.
-  const content = { q: "", mode: "text", regex: false, caseSensitive: false, found: null, hits: null, rev: "", busy: false };
+  const content = { q: "", mode: "text", regex: false, caseSensitive: false, found: null, hits: null, error: "", rev: "", busy: false, seq: 0 };
   delete ui.drill; // left over from earlier versions
   delete ui.site;
 
@@ -157,6 +157,29 @@
   }
 
   // --- forms ----------------------------------------------------------------
+
+  /**
+   * The browser's own validation messages ("Bitte füllen Sie dieses Feld
+   * aus.") follow the browser language and address the user formally; the
+   * page sets its own texts instead (form.v_*), the browser still decides
+   * when a field is invalid (required, type, min, max, step).
+   */
+  function validationMessage(el) {
+    const v = el.validity;
+    if (v.valueMissing) return t("form.v_required");
+    if (v.typeMismatch && el.type === "url") return t("form.v_url");
+    if (v.badInput) return t("form.v_number");
+    if (v.rangeUnderflow) return t("form.v_min", { min: fmtNum(+el.min) });
+    if (v.rangeOverflow) return t("form.v_max", { max: fmtNum(+el.max) });
+    if (v.stepMismatch) return t("form.v_step", { step: fmtNum(+el.step) });
+    return "";
+  }
+  document.addEventListener("invalid", (e) => {
+    e.target.setCustomValidity("");
+    e.target.setCustomValidity(validationMessage(e.target));
+  }, true);
+  // a custom message keeps a field invalid until it is cleared again
+  document.addEventListener("input", (e) => { e.target.setCustomValidity?.(""); }, true);
 
   const form = $("#check-form");
   const mform = $("#mirror-form");
@@ -587,6 +610,8 @@
     dir.textContent = t(ui.sortDesc ? "sort.desc" : "sort.asc");
 
     const rows = sorted(filtered());
+    listRows = rows;
+    $("#list-export").classList.toggle("disabled", !rows.length);
     $("#f-count").textContent = t("filter.count", { shown: fmtNum(rows.length), total: fmtNum(all.length) });
     $("#table-empty").hidden = rows.length > 0;
     $("#results-list").innerHTML = rows.slice(0, MAX_ROWS).map(resultRow).join("");
@@ -643,27 +668,41 @@
   /** Revision of the searchable content: a new search is due when it changes. */
   const contentRev = () => `${state.progress?.startedAt || ""}|${state.searchable || 0}|${(state.results || []).filter((r) => !r.pending).length}`;
 
+  /**
+   * Search as the user types (and when an option changes). Requests may
+   * overtake each other, so only the answer to the latest one is used
+   * (content.seq). An invalid regular expression is shown below the field
+   * instead of the error box – it is normal while typing one.
+   */
   async function runSearch() {
-    if (!content.q.trim()) { clearSearch(); return; }
-    content.busy = true;
-    const rev = contentRev();
-    try {
-      const res = await api("POST", "/api/search", { q: content.q, mode: content.mode, regex: content.regex, caseSensitive: content.caseSensitive });
-      content.found = res;
-      content.hits = new Map((res.matches || []).map((m) => [m.url, m]));
-      content.rev = rev;
-      showError("");
-    } catch (e) {
-      showError(e.message);
-    } finally {
-      content.busy = false;
+    const seq = ++content.seq;
+    if (!content.q.trim()) {
+      Object.assign(content, { found: null, hits: null, error: "", rev: "" });
+      updateExportLinks();
+      renderResults();
+      return;
     }
+    const rev = contentRev();
+    content.busy = true;
+    let res, error = "";
+    try {
+      res = await api("POST", "/api/search", { q: content.q, mode: content.mode, regex: content.regex, caseSensitive: content.caseSensitive });
+    } catch (e) {
+      error = e.message;
+    }
+    if (seq !== content.seq) return; // a newer search is on its way
+    content.busy = false;
+    Object.assign(content, res
+      ? { found: res, hits: new Map((res.matches || []).map((m) => [m.url, m])), error: "", rev }
+      : { found: null, hits: null, error, rev: "" });
     updateExportLinks();
     renderResults();
   }
 
+  /** "Clear search": text and options back to the defaults. */
   function clearSearch() {
-    Object.assign(content, { q: "", found: null, hits: null, rev: "" });
+    content.seq++; // ignore an answer that is still on its way
+    Object.assign(content, { q: "", mode: "text", regex: false, caseSensitive: false, found: null, hits: null, error: "", rev: "", busy: false });
     $("#content-search").q.value = "";
     updateExportLinks();
   }
@@ -676,13 +715,14 @@
     form.regex.checked = content.regex;
     form.caseSensitive.checked = content.caseSensitive;
     form.classList.toggle("active", !!content.hits);
-    $("#search-clear").hidden = !content.found;
+    $("#search-clear").hidden = !(content.q || content.mode !== "text" || content.regex || content.caseSensitive);
     const line = $("#search-info");
     const f = content.found;
-    line.hidden = !f;
-    if (f) {
+    line.hidden = !f && !content.error;
+    line.classList.toggle("warn", !!content.error || (f && !f.searched));
+    if (content.error) line.textContent = content.error;
+    else if (f) {
       const searched = fmtNum(f.searched);
-      line.classList.toggle("warn", !f.searched);
       line.textContent = !f.searched ? t("search.unavailable")
         : !f.matches.length ? t("search.no_matches", { searched })
           : t("search.summary", { pages: fmtNum(f.matches.length), n: fmtNum(f.total), searched });
@@ -690,13 +730,29 @@
     if (f && !content.busy && content.rev !== contentRev()) runSearch();
   }
 
-  $("#content-search").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const form = e.target;
-    Object.assign(content, { q: form.q.value, mode: form.mode.value, regex: form.regex.checked, caseSensitive: form.caseSensitive.checked });
+  const searchForm = $("#content-search");
+  const readSearchForm = () => Object.assign(content, {
+    q: searchForm.q.value, mode: searchForm.mode.value, regex: searchForm.regex.checked, caseSensitive: searchForm.caseSensitive.checked,
+  });
+  let searchTimer;
+  searchForm.addEventListener("input", (e) => {
+    if (e.target !== searchForm.q) return;
+    readSearchForm();
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(runSearch, 150); // a short pause: not one request per letter of a fast typist
+  });
+  searchForm.addEventListener("change", (e) => {
+    if (e.target === searchForm.q) return; // the text is handled by "input"
+    readSearchForm();
     runSearch();
   });
-  $("#search-clear").addEventListener("click", () => { clearSearch(); renderResults(); });
+  searchForm.addEventListener("submit", (e) => {
+    e.preventDefault(); // Enter searches at once
+    clearTimeout(searchTimer);
+    readSearchForm();
+    runSearch();
+  });
+  $("#search-clear").addEventListener("click", () => { clearTimeout(searchTimer); clearSearch(); renderResults(); });
 
   $("#sort-key").addEventListener("change", (e) => {
     ui.sortKey = e.target.value;
@@ -1460,7 +1516,71 @@
   }
   updateExportLinks();
   exportMenu.addEventListener("click", (e) => { if (e.target.closest("a")) exportMenu.open = false; });
-  document.addEventListener("click", (e) => { if (!exportMenu.contains(e.target)) exportMenu.open = false; });
+  // every menu closes when clicking elsewhere
+  document.addEventListener("click", (e) => {
+    for (const m of $$("details.menu")) if (!m.contains(e.target)) m.open = false;
+  });
+
+  // --- list export ----------------------------------------------------------
+
+  /** The entries of the results list as last rendered (filtered and sorted). */
+  let listRows = [];
+
+  /** The active filters as the list shows them ("Status: broken · Kind: internal"). */
+  function filterText() {
+    const parts = [];
+    const search = $("#f-search").value.trim();
+    if (search) parts.push(`${$("#f-search").closest("label").querySelector("span").textContent}: ${init.lang === "de" ? `„${search}“` : `“${search}”`}`);
+    for (const sel of $$(".filters select")) {
+      if (sel.value === "") continue;
+      parts.push(`${sel.closest("label").querySelector("span").textContent}: ${sel.selectedOptions[0]?.textContent || sel.value}`);
+    }
+    return parts.join(" · ");
+  }
+
+  /** The sort order as text ("Status, descending"), "" for the order found. */
+  function sortText() {
+    if (!ui.sortKey) return "";
+    const key = $("#sort-key").selectedOptions[0]?.textContent || ui.sortKey;
+    return `${key}, ${t(ui.sortDesc ? "sort.desc" : "sort.asc").replace(/\s*[↑↓]/u, "")}`;
+  }
+
+  /**
+   * Export exactly the listed entries: the server builds the file from the
+   * URLs in this order, the page saves it under the name the server gives.
+   */
+  async function exportList(format) {
+    showError("");
+    try {
+      const res = await fetch("/api/export/list", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-LinkScout": "1" },
+        body: JSON.stringify({
+          format,
+          urls: listRows.map((r) => r.url),
+          filters: filterText(),
+          sort: sortText(),
+          search: content.found ? content.found.query : null,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+      const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "")?.[1] || `linkscout-list.${format === "json" ? "json" : format === "csv" ? "csv" : "pdf"}`;
+      const href = URL.createObjectURL(await res.blob());
+      const a = Object.assign(document.createElement("a"), { href, download: name });
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(href), 10000);
+    } catch (e) {
+      showError(e.message);
+    }
+  }
+  $("#list-export").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-format]");
+    if (!b) return;
+    $("#list-export").open = false;
+    exportList(b.dataset.format);
+  });
 
   // --- mirror ---------------------------------------------------------------
 

@@ -142,6 +142,7 @@ type Crawler struct {
 	visited  map[string]bool        // URLs processed in the current run
 	robots   *robots.Robots         // rules of the site's robots.txt (loaded by Start)
 	content  map[string]pageContent // compressed HTML and text of the analysed pages, see Search
+	list     *ListInfo              // set while the results are an imported list export, see LoadReport
 }
 
 // New creates an idle crawler.
@@ -175,6 +176,7 @@ func (c *Crawler) Start(cfg Config) error {
 	c.order = nil
 	c.robots = nil
 	c.content = map[string]pageContent{}
+	c.list = nil
 	c.beginLocked("all")
 	// robots.txt is loaded first (it marks the URLs), then the crawl begins.
 	c.wg.Add(1)
@@ -210,6 +212,7 @@ func (c *Crawler) RecheckFailed(cfg Config) error {
 	cfg.Fetch.AuthHost = c.start.Host
 	c.cfg = cfg
 	c.client = fetch.New(cfg.Fetch)
+	c.list = nil // re-checked pages need a fresh analysis
 	c.beginLocked("failed")
 	// Successful pages count against MaxPages, they are not parsed again.
 	for _, u := range c.order {
@@ -348,7 +351,8 @@ func (c *Crawler) Load(cfg Config, results []Result) error {
 	c.start, _ = url.Parse(norm)
 	c.results = map[string]*Result{}
 	c.order = nil
-	c.content = map[string]pageContent{} // reports carry no page content
+	c.content = map[string]pageContent{} // see LoadContent
+	c.list = nil
 	c.progress = Progress{StartURL: norm}
 	for i := range results {
 		r := results[i]

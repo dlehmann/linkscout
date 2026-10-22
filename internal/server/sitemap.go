@@ -17,8 +17,7 @@ import (
 // format=json (default, for the sitemap tab), xml (sitemap.xml for search
 // engines) or html (a nested list).
 func (s *Server) handleSitemap(w http.ResponseWriter, r *http.Request) {
-	rs := s.crawler.Results()
-	crawler.Analyze(rs) // noindex / canonical decide what goes into sitemap.xml
+	rs, _ := s.crawler.Analyzed() // noindex / canonical decide what goes into sitemap.xml
 	start := s.crawler.Config().StartURL
 	tree := crawler.SiteTree(rs, start)
 	host := "site"

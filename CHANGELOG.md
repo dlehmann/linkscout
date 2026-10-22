@@ -17,11 +17,16 @@ section of a version as release notes.
   resources. Also in the HTML, PDF, CSV and JSON exports. Only what is in
   the HTML is visible; what scripts load later is not.
 - **Content search** in the results list: search the visible text or the
-  HTML source of all checked pages for a text or a regular expression. The
-  list shows only the pages with matches, each with the matches in context;
-  the exports include them. Headless: `-search`, `-search-regex`,
-  `-search-source`. Imported reports contain no page content – check the
-  site again to search it.
+  HTML source of all checked pages for a text or a regular expression, as
+  you type. The list shows only the pages with matches, each with the
+  matches in context; the exports include them. Headless: `-search`, `-search-regex`,
+  `-search-source`. JSON reports keep the text and HTML of the pages, so an
+  imported report can be searched too.
+- **Export the list**: a menu above the results list exports exactly the
+  listed URLs in their order – CSV and JSON with all data (the JSON can be
+  imported again), a detailed PDF with the key figures and details of
+  these URLs, or a summary PDF with one entry per URL. The files name the
+  active filters, the sort order and the content search.
 - **Save offline – update and continue**: downloading into a directory that
   already holds a copy only fetches what changed (the server is asked with
   ETag / Last-Modified) and removes the files that are no longer on the
@@ -37,6 +42,15 @@ section of a version as release notes.
 - **Limits**: requests per second per server (`-rate`, also for checks),
   bandwidth (`-bandwidth`) and maximum file size (`-max-file-size`) of
   offline copies, also in the advanced settings of the form.
+
+### Changed
+
+- **JSON reports** contain the text and HTML of the checked pages (for the
+  content search after an import). An imported list export keeps the SEO
+  issues found on the whole site until it is checked again.
+- **German texts** address the user consistently with "du", including the
+  messages of required and invalid form fields, which came from the
+  browser before.
 
 ### Fixed
 

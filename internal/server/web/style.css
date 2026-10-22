@@ -474,8 +474,12 @@ details.menu .menu-items {
   display: grid; padding: 4px; border-radius: 10px;
   background: var(--surface); border: 1px solid var(--border); box-shadow: 0 6px 20px rgba(0, 0, 0, .18);
 }
-details.menu .menu-items a { padding: 7px 10px; border-radius: 6px; color: var(--text); text-decoration: none; font-weight: 500; }
-details.menu .menu-items a:hover { background: var(--surface-2); }
+details.menu .menu-items a, details.menu .menu-items button {
+  padding: 7px 10px; border: 0; border-radius: 6px; background: none; box-shadow: none;
+  color: var(--text); text-decoration: none; font: inherit; font-weight: 500; text-align: left; cursor: pointer;
+}
+details.menu .menu-items a:hover, details.menu .menu-items button:hover { background: var(--surface-2); filter: none; }
+.list-bar details.menu .menu-items { min-width: 200px; }
 
 
 /* --- SEO charts ------------------------------------------------------------ */

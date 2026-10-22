@@ -926,11 +926,95 @@ func TestSearchAndThirdPartyExports(t *testing.T) {
 		t.Errorf("export with invalid search: %s", resp.Status)
 	}
 
-	// An imported report has no page content: nothing is searched.
+	// The JSON report keeps the page content, so it is searchable again
+	// after an import; an older report without it is not.
+	if len(rep.Content) != 1 || !strings.Contains(rep.Content[0].Text, "Call 0123-456 now") {
+		t.Fatalf("content = %+v", rep.Content)
+	}
+	search := func() crawler.SearchResult {
+		var res crawler.SearchResult
+		_, b := do(t, "POST", ui.URL+"/api/search", crawler.SearchQuery{Query: "googletagmanager", Mode: crawler.SearchSource})
+		json.Unmarshal(b, &res)
+		return res
+	}
 	do(t, "POST", ui.URL+"/api/import", rep)
-	_, b = do(t, "POST", ui.URL+"/api/search", crawler.SearchQuery{Query: "0123"})
-	json.Unmarshal(b, &res)
-	if res.Searched != 0 || len(res.Matches) != 0 {
+	if res := search(); res.Searched != 1 || res.Total != 1 {
 		t.Errorf("search after import = %+v", res)
+	}
+	rep.Content = nil
+	do(t, "POST", ui.URL+"/api/import", rep)
+	if res := search(); res.Searched != 0 || len(res.Matches) != 0 {
+		t.Errorf("search after import without content = %+v", res)
+	}
+	if _, b := do(t, "GET", ui.URL+"/api/state", nil); strings.Contains(string(b), "htmlDeflate") {
+		t.Error("the state must not carry the page content")
+	}
+}
+
+// The results list is exported with exactly the given URLs in their order.
+func TestListExport(t *testing.T) {
+	site := target(t)
+	s, ui := newUI(t, i18n.DE)
+	do(t, "POST", ui.URL+"/api/check", CheckRequest{URL: site.URL})
+	waitIdle(t, s)
+	urls := []string{site.URL + "/ok", site.URL + "/"}
+	export := func(format string) (*http.Response, []byte) {
+		return do(t, "POST", ui.URL+"/api/export/list", ListExportRequest{Format: format, URLs: urls,
+			Filters: "Status: 200", Sort: "Titel, absteigend", Search: &crawler.SearchQuery{Query: "ok"}})
+	}
+
+	resp, b := export("json")
+	var rep crawler.Report
+	json.Unmarshal(b, &rep)
+	if resp.StatusCode != 200 || !strings.Contains(resp.Header.Get("Content-Disposition"), "-list-") ||
+		len(rep.Results) != 2 || rep.Results[0].URL != urls[0] || rep.List == nil || rep.List.Total < 4 ||
+		len(rep.Content) != 2 || rep.Search == nil {
+		t.Fatalf("json: %s %+v", resp.Status, rep)
+	}
+	resp, b = export("csv")
+	rows := strings.Count(strings.TrimSpace(string(b)), "\n")
+	if resp.StatusCode != 200 || !strings.HasPrefix(string(b), "url,") || !strings.Contains(string(b), "search_matches") {
+		t.Errorf("csv: %s %s", resp.Status, b)
+	} else if lines := strings.Split(string(b), "\n"); !strings.HasPrefix(lines[1], urls[0]+",") || rows < 2 {
+		t.Errorf("csv order: %s", b)
+	}
+	for _, format := range []string{"pdf", "pdf-summary"} {
+		resp, b = export(format)
+		pdf := string(b)
+		if resp.StatusCode != 200 || !strings.HasPrefix(pdf, "%PDF-1.4") || !strings.Contains(pdf, "LinkScout-Liste f") ||
+			!strings.Contains(pdf, "Ergebnisliste: 2 von") || !strings.Contains(pdf, "sortiert nach Titel, absteigend") {
+			t.Errorf("%s: %s", format, resp.Status)
+		}
+	}
+	if resp, b := export("pdf"); resp.StatusCode != 200 || strings.Contains(string(b), "Status aller URLs") || !strings.Contains(string(b), "URLs gesamt") {
+		t.Error("the detailed list PDF has the key figures but no charts")
+	}
+	if !strings.Contains(resp.Header.Get("Content-Disposition"), "list-summary") {
+		t.Error("summary file name")
+	}
+	if resp, _ := export("xls"); resp.StatusCode != 400 {
+		t.Errorf("unknown format: %s", resp.Status)
+	}
+
+	// Both JSON exports can be imported again (the same format): the list
+	// keeps its URLs, order, issues and page content.
+	_, b = export("json")
+	var listRep crawler.Report
+	json.Unmarshal(b, &listRep)
+	if resp, b := do(t, "POST", ui.URL+"/api/import", listRep); resp.StatusCode != 200 {
+		t.Fatalf("import list: %s %s", resp.Status, b)
+	}
+	var st State
+	_, b = do(t, "GET", ui.URL+"/api/state", nil)
+	json.Unmarshal(b, &st)
+	if len(st.Results) != 2 || st.Results[0].URL != urls[0] || st.Searchable != 2 ||
+		!slices.Equal(st.Results[1].Issues, listRep.Results[1].Issues) {
+		t.Errorf("state after list import: %d results, searchable %d", len(st.Results), st.Searchable)
+	}
+	_, b = do(t, "GET", ui.URL+"/api/export?format=json", nil)
+	var again crawler.Report
+	json.Unmarshal(b, &again)
+	if again.List == nil || len(again.Results) != 2 || len(again.Content) != 2 {
+		t.Errorf("export after list import: %+v", again.List)
 	}
 }

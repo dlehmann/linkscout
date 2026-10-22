@@ -393,6 +393,12 @@ func Analyze(rs []Result) []IssueCount {
 		}
 	}
 
+	return CountIssues(rs)
+}
+
+// CountIssues counts the issues the results already carry (set by Analyze),
+// in the order of the catalogue.
+func CountIssues(rs []Result) []IssueCount {
 	counts := map[string]int{}
 	for i := range rs {
 		for _, id := range rs[i].Issues {

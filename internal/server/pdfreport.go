@@ -48,21 +48,7 @@ func WritePDFReport(w io.Writer, rep crawler.Report, lang i18n.Lang, external bo
 	d.newPage()
 	left, right := pdfMargin, pdfW-pdfMargin
 
-	d.y += 18
-	for i, l := range wrap(v.Title, right-left, 18, true) {
-		if i > 0 {
-			d.y += 22
-		}
-		d.text(left, d.y, 18, true, pdfText, l)
-	}
-	d.y += 16
-	d.text(left, d.y, 9, false, pdfMuted, v.Created)
-	for _, line := range []string{v.Scope, v.Search} {
-		if line != "" {
-			d.y += 12
-			d.text(left, d.y, 9, false, pdfMuted, fit(line, right-left, 9, false, false))
-		}
-	}
+	reportHeader(d, v, left, right)
 
 	// Key figures as a row of boxes.
 	d.y += 14
@@ -112,20 +98,25 @@ func WritePDFReport(w io.Writer, rep crawler.Report, lang i18n.Lang, external bo
 	// Every URL with its details.
 	d.need(60)
 	d.y += 14
-	d.text(left, d.y, 13, true, pdfText, fmt.Sprintf("%s (%d)", i18n.T(lang, "report.results"), len(v.Details)))
+	d.text(left, d.y, 13, true, pdfText, fmt.Sprintf("%s (%d)", v.Heading, len(v.Details)))
 	d.y += 6
 	for _, det := range v.Details {
 		drawDetail(d, det, left, right)
 	}
 
-	// Page numbers ("3 / 12") and the start URL in the footer.
+	pageFooter(d, v, left, right)
+	return d.write(w, v.Title)
+}
+
+// pageFooter writes the page numbers ("3 / 12") and the start URL into the
+// footer of every page.
+func pageFooter(d *pdfDoc, v reportView, left, right float64) {
 	for i, p := range d.pages {
 		d.cur = p
 		label := fmt.Sprintf("%d / %d", i+1, len(d.pages))
 		d.text(right-textWidth(label, 8, false), pdfH-pdfMargin+4, 8, false, pdfMuted, label)
 		d.text(left, pdfH-pdfMargin+4, 8, false, pdfMuted, fit(v.StartURL, right-left-60, 8, false, false))
 	}
-	return d.write(w, v.Title)
 }
 
 // Chart geometry in the PDF.

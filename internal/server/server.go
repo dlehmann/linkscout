@@ -12,6 +12,8 @@
 //	POST /api/stop          stop the running check
 //	GET  /api/export        download the report (?format=json|csv|html|pdf, default json;
 //	                        q, mode, regex=1, case=1 add a content search)
+//	POST /api/export/list   download the results list as filtered and sorted in the UI
+//	                        {format: csv|json|pdf|pdf-summary, urls, filters, sort, search}
 //	POST /api/search        search the content of the checked pages {q, mode, regex, caseSensitive}
 //	POST /api/compare       compare the results with an earlier JSON report (body)
 //	POST /api/import        load a JSON report (to re-check it later)
@@ -133,6 +135,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/export", s.handleExport)
 	mux.HandleFunc("GET /api/sitemap", s.handleSitemap)
 	mux.HandleFunc("POST /api/search", s.handleSearch)
+	mux.HandleFunc("POST /api/export/list", s.handleListExport)
 	mux.HandleFunc("POST /api/import", s.handleImport)
 	mux.HandleFunc("POST /api/compare", s.handleCompare)
 	mux.HandleFunc("POST /api/mirror", s.handleMirror)
@@ -194,9 +197,8 @@ type State struct {
 
 // state collects the complete UI state.
 func (s *Server) state() State {
-	rs := s.crawler.Results()
+	rs, issues := s.crawler.Analyzed()
 	cfg := s.crawler.Config()
-	issues := crawler.Analyze(rs)
 	return State{
 		Issues:     issues,
 		ThirdParty: crawler.NewThirdParty(rs),
@@ -372,6 +374,71 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/pdf")
 		WritePDFReport(w, rep, s.opts.Lang, external)
 	default:
+		rep.Content = s.crawler.Content() // searchable again after an import
+		writeJSON(w, http.StatusOK, rep)
+	}
+}
+
+// ListExportRequest is the body of POST /api/export/list: the URLs of the
+// results list in the order shown, how the list was filtered and sorted
+// (as text for the report header) and the content search it shows.
+type ListExportRequest struct {
+	Format  string               `json:"format"` // csv, json, pdf (detailed) or pdf-summary
+	URLs    []string             `json:"urls"`
+	Filters string               `json:"filters"`
+	Sort    string               `json:"sort"`
+	Search  *crawler.SearchQuery `json:"search"`
+}
+
+// handleListExport downloads the results list of the UI. CSV and JSON
+// carry everything (the JSON is a report that can be imported again), the
+// detailed PDF is the full report restricted to the list, the summary PDF
+// one entry per URL like the list itself.
+func (s *Server) handleListExport(w http.ResponseWriter, r *http.Request) {
+	var req ListExportRequest
+	if err := decode(r, &req); err != nil {
+		s.fail(w, http.StatusBadRequest, err)
+		return
+	}
+	rep := crawler.NewReport(s.crawler, "LinkScout "+s.opts.Version)
+	if req.Search != nil && req.Search.Query != "" {
+		res, err := s.crawler.Search(*req.Search)
+		if err != nil {
+			s.fail(w, http.StatusBadRequest, s.searchError(err))
+			return
+		}
+		rep.Search = &res
+	}
+	if req.Format == "json" {
+		rep.Content = s.crawler.Content()
+	}
+	rep = rep.Select(req.URLs, crawler.ListInfo{Filters: req.Filters, Sort: req.Sort})
+
+	ext, suffix := req.Format, "list"
+	switch req.Format {
+	case "csv", "json", "pdf":
+	case "pdf-summary":
+		ext, suffix = "pdf", "list-summary"
+	default:
+		s.fail(w, http.StatusBadRequest, fmt.Errorf("unknown format %q", req.Format))
+		return
+	}
+	name := "linkscout-" + suffix + "." + ext
+	if u, err := url.Parse(rep.StartURL); err == nil && u.Host != "" {
+		name = fmt.Sprintf("linkscout-%s-%s-%s.%s", sanitizeName(u.Host), suffix, time.Now().Format("20060102-150405"), ext)
+	}
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	switch req.Format {
+	case "csv":
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		crawler.WriteCSV(w, rep.Results, rep.Search)
+	case "pdf":
+		w.Header().Set("Content-Type", "application/pdf")
+		WritePDFReport(w, rep, s.opts.Lang, true)
+	case "pdf-summary":
+		w.Header().Set("Content-Type", "application/pdf")
+		WritePDFList(w, rep, s.opts.Lang)
+	default:
 		writeJSON(w, http.StatusOK, rep)
 	}
 }
@@ -408,7 +475,7 @@ func (s *Server) handleCompare(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, crawler.Compare(old, s.crawler.Results()))
+	writeJSON(w, http.StatusOK, crawler.Compare(old, crawler.NewReport(s.crawler, "")))
 }
 
 // handleImport loads a JSON report so it can be viewed and re-checked.
@@ -419,7 +486,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := crawler.Config{StartURL: rep.StartURL, Fetch: fetch.Options{Referer: rep.Referer, UserAgent: rep.UserAgent}, CheckExternal: true}
-	if err := s.crawler.Load(cfg, rep.Results); err != nil {
+	if err := s.crawler.LoadReport(cfg, rep); err != nil {
 		s.fail(w, http.StatusBadRequest, err)
 		return
 	}

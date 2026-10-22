@@ -258,7 +258,7 @@ func TestCompareAndCSV(t *testing.T) {
 		{URL: "https://e.com/new", Status: 200, Kind: KindInternal, Internal: true, Depth: 1, FoundOn: []string{"https://e.com/"}},
 		{URL: "https://e.com/pending", Pending: true},
 	}
-	c := Compare(old, cur)
+	c := Compare(old, Report{Results: cur})
 	if !reflect.DeepEqual(c.Added, []string{"https://e.com/new"}) || !reflect.DeepEqual(c.Removed, []string{"https://e.com/gone"}) ||
 		len(c.Status) != 1 || c.Status[0] != (StatusChange{"https://e.com/a", 200, 404}) || !c.OldCreatedAt.Equal(old.CreatedAt) {
 		t.Errorf("comparison = %+v", c)
