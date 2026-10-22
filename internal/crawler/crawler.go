@@ -56,6 +56,8 @@ type Result struct {
 	FoundOn     []string  `json:"foundOn,omitempty"`
 	Pending     bool      `json:"pending,omitempty"`
 	CheckedAt   time.Time `json:"checkedAt,omitempty"`
+	// LastModified is the Last-Modified header of a successful response.
+	LastModified time.Time `json:"lastModified,omitempty"`
 
 	// SEO data (all optional, so older reports stay valid).
 	InSitemap     bool     `json:"inSitemap,omitempty"`     // listed in sitemap.xml
@@ -527,6 +529,10 @@ func (c *Crawler) work(u string) {
 		}
 	}
 	res.ContentType = resp.ContentType
+	res.LastModified = time.Time{}
+	if resp.Status >= 200 && resp.Status < 300 {
+		res.LastModified = resp.LastModified
+	}
 	res.Size = resp.Size
 	res.DurationMs = resp.Duration.Milliseconds()
 	res.Redirects = resp.Redirects

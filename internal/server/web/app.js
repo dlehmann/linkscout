@@ -87,6 +87,8 @@
   }
   /** Format a number with the grouping of the UI language (1,234 / 1.234). */
   function fmtNum(n) { return new Intl.NumberFormat(init.lang).format(n || 0); }
+  /** Short date in the UI language (22.10.2026 / 10/22/2026). */
+  function fmtDate(iso) { return new Date(iso).toLocaleDateString(init.lang); }
   /** Go serialises an unset time.Time as "0001-01-01T00:00:00Z". */
   function isSet(t) { return !!t && !t.startsWith("0001-"); }
 
@@ -137,7 +139,7 @@
    */
   function setTab(tab) {
     if (tab === "seo") tab = "stats"; // the former SEO tab lives on in the overview
-    if (!["results", "stats", "mirror"].includes(tab)) tab = "stats";
+    if (!["results", "stats", "sitemap", "mirror"].includes(tab)) tab = "stats";
     ui.tab = tab;
     const navTab = tab === "mirror" ? "mirror" : "results"; // overview, results and SEO belong to "Check website"
     for (const b of $$(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === navTab));
@@ -337,6 +339,7 @@
     renderProgress();
     if (ui.tab === "results") renderResults();
     if (ui.tab === "stats") renderStats();
+    if (ui.tab === "sitemap") renderSitemap();
     if (ui.tab === "mirror") renderMirror();
   }
 
@@ -442,7 +445,7 @@
     if (!k) return rows;
     const dir = ui.sortDesc ? -1 : 1;
     const num = k === "status" || k === "durationMs" || k === "depth" || k === "size" || k === "issues";
-    const val = (r) => (k === "type" ? typeOf(r) : k === "issues" ? issueWeight(r) : r[k]);
+    const val = (r) => (k === "type" ? typeOf(r) : k === "issues" ? issueWeight(r) : k === "lastModified" ? (isSet(r.lastModified) ? r.lastModified : "") : r[k]);
     return rows.slice().sort((a, b) => {
       let x = val(a), y = val(b);
       if (num) {
@@ -514,7 +517,7 @@
   /** The columns the list can be sorted by (the second line of a row). */
   const SORT_KEYS = [
     ["url", "col.url"], ["status", "col.status"], ["type", "col.type"], ["title", "col.title"],
-    ["kind", "col.kind"], ["depth", "col.depth"], ["size", "col.size"], ["durationMs", "col.time"], ["issues", "col.seo"],
+    ["kind", "col.kind"], ["depth", "col.depth"], ["lastModified", "col.modified"], ["size", "col.size"], ["durationMs", "col.time"], ["issues", "col.seo"],
   ];
 
   /**
@@ -539,6 +542,7 @@
       <span class="c-type">${esc(typeOf(r))}</span>
       <span class="c-kind"><span class="kind">${esc(t(`kind.${r.kind}`))}</span></span>
       <span class="c-num" title="${esc(t("col.depth"))}">${esc(depth)}</span>
+      <span class="c-num" title="${esc(t("detail.last_modified"))}">${isSet(r.lastModified) ? esc(fmtDate(r.lastModified)) : ""}</span>
       <span class="c-num" title="${esc(t("col.size"))}">${size}</span>
       <span class="c-num" title="${esc(t("col.time"))}">${time}</span>
       <span class="c-seo">${issueBadge(r)}</span>
@@ -547,7 +551,7 @@
 
   $("#sort-key").addEventListener("change", (e) => {
     ui.sortKey = e.target.value;
-    ui.sortDesc = ["status", "size", "durationMs", "issues"].includes(ui.sortKey); // big numbers first
+    ui.sortDesc = ["status", "size", "durationMs", "issues", "lastModified"].includes(ui.sortKey); // big numbers and newest first
     save("linkscout.ui", ui);
     renderResults();
   });
@@ -747,6 +751,7 @@
       [t("detail.duration"), fmtMs(r.durationMs)],
       [t("detail.depth"), r.depth],
       isSet(r.checkedAt) && [t("detail.checked_at"), new Date(r.checkedAt).toLocaleString(init.lang)],
+      isSet(r.lastModified) && [t("detail.last_modified"), new Date(r.lastModified).toLocaleString(init.lang)],
       r.foundOn?.length && [t("detail.found_on"), `<ul>${r.foundOn.map((u) => `<li>${link(u)}</li>`).join("")}</ul>`],
       r.internal && r.depth > 0 && [t("detail.inlinks"), r.foundOn?.length >= 50 ? "50+" : String(r.foundOn?.length || 0)],
       r.inSitemap && [t("detail.in_sitemap"), esc(t("misc.yes"))],
@@ -1067,6 +1072,90 @@
     });
     area.addEventListener("focusout", () => { tip.hidden = true; });
   }
+
+  // --- site structure -------------------------------------------------------
+  //
+  // The tree comes from GET /api/sitemap (crawler.SiteTree): the internal
+  // HTML pages with status 200 by URL path. It is fetched again only when
+  // the results changed.
+
+  let sitemapTree = null;
+  let sitemapKey = "";
+  let sitemapLoading = null;
+  const sitemapOpen = new Map(); // path → open; default: the first two levels are open
+
+  async function renderSitemap() {
+    const rs = state.results || [];
+    const key = `${rs.length}:${rs.filter((r) => !r.pending).length}:${state.progress?.running}`;
+    if (key !== sitemapKey && !sitemapLoading) {
+      sitemapLoading = api("GET", "/api/sitemap")
+        .then((tree) => { sitemapTree = tree; sitemapKey = key; })
+        .catch((e) => showError(e.message))
+        .finally(() => { sitemapLoading = null; if (ui.tab === "sitemap") drawSitemap(); });
+    }
+    drawSitemap();
+  }
+
+  const isOpen = (n, level) => sitemapOpen.get(n.path) ?? level < 2;
+
+  /** One node of the tree: toggle, name (link), title, date, exclusion, pages below. */
+  function sitemapNode(n, level) {
+    const kids = n.children || [];
+    const open = kids.length && isOpen(n, level);
+    const name = level === 0 ? n.name || "/" : n.url ? n.name : `${n.name}/`;
+    const label = n.url
+      ? `<a class="sm-name" href="${esc(n.url)}" target="_blank" rel="noopener noreferrer" title="${esc(n.url)}">${esc(name)}</a>`
+      : `<span class="sm-name dir" title="${esc(n.path)}">${esc(name)}</span>`;
+    const excluded = n.excluded ? `<span class="sm-excluded" title="${esc(t("sitemap.excluded_help"))}">${esc(t(`sitemap.excluded_${n.excluded}`))}</span>` : "";
+    const below = kids.length ? `<span class="sm-count">${esc(t("sitemap.pages", { n: fmtNum(n.pages - (n.url ? 1 : 0)) }))}</span>` : "";
+    const toggle = kids.length
+      ? `<button type="button" class="sm-toggle" data-path="${esc(n.path)}" data-level="${level}" aria-expanded="${open}" aria-label="${esc(t(open ? "sitemap.collapse" : "sitemap.expand"))}">${open ? "▾" : "▸"}</button>`
+      : `<span class="sm-toggle"></span>`;
+    return `<li><div class="sm-row${n.url ? " page" : ""}" ${n.url ? `data-url="${esc(n.url)}"` : ""}>
+        ${toggle}${label}<span class="sm-title">${esc(n.title || "")}</span>${excluded}${below}
+        <span class="sm-date">${isSet(n.lastModified) ? esc(fmtDate(n.lastModified)) : ""}</span>
+      </div>${open ? `<ul>${kids.map((c) => sitemapNode(c, level + 1)).join("")}</ul>` : ""}</li>`;
+  }
+
+  function drawSitemap() {
+    const el = $("#sitemap-tree");
+    const tree = sitemapTree;
+    const pages = tree?.pages || 0;
+    for (const id of ["#sitemap-xml", "#sitemap-html", "#sitemap-expand", "#sitemap-collapse"]) $(id).classList.toggle("disabled", !pages);
+    $("#sitemap-count").textContent = pages ? t("sitemap.count", { n: fmtNum(pages) }) : "";
+    if (!pages) {
+      el.innerHTML = `<p class="empty">${esc(t(sitemapLoading && !tree ? "sitemap.loading" : "sitemap.empty"))}</p>`;
+      return;
+    }
+    el.innerHTML = `<ul class="sm-tree">${sitemapNode(tree, 0)}</ul>`;
+  }
+
+  /** Open or close every node. */
+  function sitemapAll(open) {
+    const walk = (n) => {
+      if (!n.children?.length) return;
+      sitemapOpen.set(n.path, open);
+      n.children.forEach(walk);
+    };
+    if (sitemapTree) {
+      walk(sitemapTree);
+      sitemapOpen.set(sitemapTree.path, true); // the root stays open
+    }
+    drawSitemap();
+  }
+  $("#sitemap-expand").addEventListener("click", () => sitemapAll(true));
+  $("#sitemap-collapse").addEventListener("click", () => sitemapAll(false));
+  $("#sitemap-tree").addEventListener("click", (e) => {
+    const tg = e.target.closest("button.sm-toggle");
+    if (tg) {
+      sitemapOpen.set(tg.dataset.path, tg.getAttribute("aria-expanded") !== "true");
+      drawSitemap();
+      return;
+    }
+    if (e.target.closest("a")) return; // the link opens the page in a new tab
+    const row = e.target.closest(".sm-row[data-url]");
+    if (row) openDetail(row.dataset.url);
+  });
 
   // --- SEO ------------------------------------------------------------------
 

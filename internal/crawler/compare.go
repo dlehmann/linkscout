@@ -102,7 +102,7 @@ func minus(a, b []string) []string {
 var CSVHeader = []string{
 	"url", "final_url", "redirects", "status", "error", "kind", "internal", "mime_type",
 	"type", "category", "content_type", "title", "clicks", "size", "duration_ms",
-	"checked_at", "found_on", "in_sitemap", "robots_blocked",
+	"checked_at", "last_modified", "found_on", "in_sitemap", "robots_blocked",
 	"worst_issue", "issues",
 	"seo_titles", "seo_descriptions", "seo_robots", "seo_canonicals", "seo_h1",
 	"seo_headings", "seo_lang", "seo_viewport", "seo_hreflang", "seo_jsonld",
@@ -134,7 +134,7 @@ func WriteCSV(w io.Writer, rs []Result) error {
 			r.URL, r.FinalURL, lines(r.Redirects), strconv.Itoa(r.Status), r.Error, r.Kind,
 			strconv.FormatBool(r.Internal), ResultMime(r), r.Type, r.Category, r.ContentType, r.Title,
 			strconv.Itoa(r.Depth), strconv.FormatInt(r.Size, 10), strconv.FormatInt(r.DurationMs, 10),
-			stamp(r.CheckedAt), lines(r.FoundOn),
+			stamp(r.CheckedAt), stamp(r.LastModified), lines(r.FoundOn),
 			strconv.FormatBool(r.InSitemap), strconv.FormatBool(r.RobotsBlocked),
 			worst, lines(r.Issues),
 		}

@@ -192,11 +192,12 @@ details.advanced summary { cursor: pointer; color: var(--muted); font-weight: 60
 .list-bar select { padding: 4px 8px; font-size: 13px; }
 /* Every entry uses the same columns (subgrid of #results-list), so the
    values of all URLs stand below each other. Columns: status, title (takes
-   the rest), MIME type, kind, clicks, size, time, SEO. Values with a number
-   (clicks, size, time) are right-aligned, text columns left-aligned. */
+   the rest), MIME type, kind, clicks, last modified, size, time, SEO. Values
+   with a number (clicks, date, size, time) are right-aligned, text columns
+   left-aligned. */
 #results-list {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto auto auto auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto auto auto auto auto;
 }
 .result {
   grid-column: 1 / -1;
@@ -452,3 +453,33 @@ details.menu .menu-items a:hover { background: var(--surface-2); }
 /* --- compare dialog -------------------------------------------------------- */
 #compare h3 { font-size: 14px; margin: 18px 0 6px; }
 #compare .list { max-height: 260px; overflow: auto; }
+
+/* --- site structure ---------------------------------------------------------- */
+.sitemap-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sitemap-bar h3 { margin: 0; }
+.sitemap-bar .sub { margin: 2px 0 0; }
+.sitemap-bar a.button.disabled, .sitemap-bar button.disabled { opacity: .45; pointer-events: none; }
+.sitemap-intro { color: var(--muted); font-size: 12px; margin: 8px 0 12px; }
+.sm-tree, .sm-tree ul { list-style: none; margin: 0; padding: 0; }
+.sm-tree ul { margin-left: 11px; padding-left: 12px; border-left: 1px solid var(--border); }
+.sm-row {
+  display: flex; align-items: baseline; gap: 8px; padding: 3px 6px; border-radius: 6px;
+  font-size: 13px; min-width: 0;
+}
+.sm-row.page { cursor: pointer; }
+.sm-row.page:hover { background: var(--row-hover); }
+.sm-toggle {
+  flex: none; width: 18px; padding: 0; border: 0; background: none; color: var(--muted);
+  font-size: 12px; line-height: 1; cursor: pointer; text-align: center;
+}
+span.sm-toggle { cursor: default; }
+.sm-name { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text); text-decoration: none; }
+a.sm-name:hover { color: var(--accent); text-decoration: underline; }
+.sm-name.dir { color: var(--muted); font-weight: 500; }
+.sm-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.sm-count, .sm-date { flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.sm-date { min-width: 80px; text-align: right; }
+.sm-excluded {
+  flex: none; font-size: 11px; color: var(--warn); border: 1px solid currentColor; border-radius: 4px; padding: 0 5px;
+}
+@media (max-width: 720px) { .sm-title { display: none; } .sm-name { max-width: none; flex: 1; } }

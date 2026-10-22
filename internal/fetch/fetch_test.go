@@ -379,3 +379,26 @@ func TestRedirectLoopAndKeptHeaders(t *testing.T) {
 		t.Error("certificate expiry not recorded")
 	}
 }
+
+// Last-Modified is parsed from the final response; a broken value is ignored.
+func TestLastModified(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/old":
+			http.Redirect(w, r, "/page", http.StatusMovedPermanently)
+		case "/page":
+			w.Header().Set("Last-Modified", "Wed, 21 Oct 2026 07:28:00 GMT")
+		case "/broken":
+			w.Header().Set("Last-Modified", "yesterday")
+		}
+	}))
+	defer srv.Close()
+	c := New(Options{})
+	want := time.Date(2026, 10, 21, 7, 28, 0, 0, time.UTC)
+	if r := c.Get(context.Background(), srv.URL+"/old", "", false, 0); !r.LastModified.Equal(want) {
+		t.Errorf("LastModified = %v, want %v", r.LastModified, want)
+	}
+	if r := c.Probe(context.Background(), srv.URL+"/broken", ""); !r.LastModified.IsZero() {
+		t.Errorf("broken LastModified = %v", r.LastModified)
+	}
+}

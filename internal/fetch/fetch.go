@@ -86,6 +86,9 @@ type Response struct {
 	Header http.Header
 	// CertNotAfter is the expiry of the server certificate (HTTPS only).
 	CertNotAfter time.Time
+	// LastModified is the Last-Modified header of the final response (zero
+	// when missing or invalid).
+	LastModified time.Time
 }
 
 // keptHeaders are copied into Response.Header. Everything else is dropped to
@@ -296,6 +299,9 @@ func (c *Client) doWith(hc *http.Client, ctx context.Context, method, target, so
 	res.Redirects = redirectChain(resp)
 	res.ContentType = mediaType(resp.Header.Get("Content-Type"))
 	res.Size = resp.ContentLength
+	if t, err := http.ParseTime(resp.Header.Get("Last-Modified")); err == nil {
+		res.LastModified = t.UTC()
+	}
 	for _, k := range keptHeaders {
 		if v := resp.Header.Values(k); len(v) > 0 {
 			if res.Header == nil {

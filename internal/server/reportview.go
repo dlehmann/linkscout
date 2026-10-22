@@ -354,6 +354,9 @@ func (d detailBuilder) detail(r crawler.Result) rDetail {
 	if !r.CheckedAt.IsZero() {
 		add("detail.checked_at", text(f.dateTime(r.CheckedAt)))
 	}
+	if !r.LastModified.IsZero() {
+		add("detail.last_modified", text(f.dateTime(r.LastModified)))
+	}
 	if len(r.FoundOn) > 0 {
 		add("detail.found_on", d.list(r.FoundOn, true, false))
 	}

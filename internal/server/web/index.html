@@ -94,6 +94,7 @@
     <!-- Sub-tabs of the link checker -->
     <nav class="subtabs" id="subtabs" role="tablist">
       <button role="tab" data-tab="stats" data-i18n="tab.stats"></button>
+      <button role="tab" data-tab="sitemap" data-i18n="tab.sitemap"></button>
       <!-- the results list stays the last tab -->
       <button role="tab" data-tab="results" data-i18n="tab.list"></button>
     </nav>
@@ -130,6 +131,26 @@
     <!-- Statistics -->
     <section class="tab-panel" id="tab-stats">
       <div id="stats-body"></div>
+    </section>
+
+    <!-- Site structure (internal HTML pages by URL path); no element may
+         have the id "sitemap", that is the hash of the tab -->
+    <section class="tab-panel" id="tab-sitemap">
+      <div class="panel">
+        <div class="sitemap-bar">
+          <div>
+            <h3 data-i18n="sitemap.title"></h3>
+            <p class="sub" id="sitemap-count"></p>
+          </div>
+          <span class="spacer"></span>
+          <button type="button" class="ghost" id="sitemap-expand" data-i18n="sitemap.expand"></button>
+          <button type="button" class="ghost" id="sitemap-collapse" data-i18n="sitemap.collapse"></button>
+          <a class="button" id="sitemap-xml" href="/api/sitemap?format=xml" download data-i18n="sitemap.export_xml"></a>
+          <a class="button" id="sitemap-html" href="/api/sitemap?format=html" download data-i18n="sitemap.export_html"></a>
+        </div>
+        <p class="sitemap-intro" data-i18n="sitemap.intro"></p>
+        <div id="sitemap-tree"></div>
+      </div>
     </section>
 
 

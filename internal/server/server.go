@@ -124,6 +124,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/check", s.handleCheck)
 	mux.HandleFunc("POST /api/stop", s.handleStop)
 	mux.HandleFunc("GET /api/export", s.handleExport)
+	mux.HandleFunc("GET /api/sitemap", s.handleSitemap)
 	mux.HandleFunc("POST /api/import", s.handleImport)
 	mux.HandleFunc("POST /api/compare", s.handleCompare)
 	mux.HandleFunc("POST /api/mirror", s.handleMirror)

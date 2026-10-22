@@ -779,3 +779,29 @@ func TestPDFReportLongLists(t *testing.T) {
 		t.Errorf("type/x-77 appears %d times, want 2", n)
 	}
 }
+
+// The sitemap tab gets the site structure as JSON; sitemap.xml and the HTML
+// list are downloads.
+func TestSitemapEndpoint(t *testing.T) {
+	site := target(t)
+	s, ui := newUI(t, i18n.EN)
+	do(t, "POST", ui.URL+"/api/check", CheckRequest{URL: site.URL})
+	waitIdle(t, s)
+
+	resp, body := do(t, "GET", ui.URL+"/api/sitemap", nil)
+	var tree crawler.SiteNode
+	if err := json.Unmarshal(body, &tree); err != nil || resp.StatusCode != 200 || tree.Pages == 0 || tree.URL == "" {
+		t.Fatalf("tree: %d %s", resp.StatusCode, body)
+	}
+	resp, body = do(t, "GET", ui.URL+"/api/sitemap?format=xml", nil)
+	if !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/xml") ||
+		!strings.Contains(resp.Header.Get("Content-Disposition"), `filename="sitemap.xml"`) ||
+		!strings.Contains(string(body), "<loc>"+tree.URL+"</loc>") {
+		t.Errorf("sitemap.xml: %s %s", resp.Header, body)
+	}
+	resp, body = do(t, "GET", ui.URL+"/api/sitemap?format=html", nil)
+	if !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/html") || !strings.Contains(string(body), "<ul>") ||
+		!strings.Contains(string(body), `href="`+tree.URL+`"`) || strings.Contains(string(body), "<script") {
+		t.Errorf("sitemap HTML: %s", body)
+	}
+}
