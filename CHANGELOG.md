@@ -5,6 +5,43 @@ All notable changes to LinkScout. The format follows
 [Semantic Versioning](https://semver.org/). The release workflow uses the
 section of a version as release notes.
 
+## [1.3.0] - 2026-10-22
+
+### Added
+
+- **Sitemap tab**: the site structure – every internal HTML page with status
+  200 as a tree by its URL path, with title, last modification date and the
+  number of pages below each folder; a click on a page opens its details.
+  Exports: **sitemap.xml** for Google Search Console (with `lastmod`;
+  pages with `noindex`, another canonical URL or blocked by robots.txt are
+  marked in the tree and left out; every URL uses the scheme and host the
+  start page answers under, so www/non-www and http/https mixes do not
+  break the Search Console) and the tree as **HTML** (nested list)
+- **Last modified**: the Last-Modified header of every URL in the results
+  list (column and sort order), in the details, in the HTML and PDF reports
+  and in the JSON and CSV exports
+
+### Changed
+
+- The **HTML and PDF reports** are much more detailed: they contain every
+  figure and chart of the overview (status, SEO health, length of titles and
+  descriptions, response times, clicks from the start page, status codes,
+  MIME types, size by MIME type) and, for every URL, what its detail view
+  shows – redirect chain, linking pages, SEO data and every SEO issue with
+  its explanation and what exactly was found. The separate list of SEO
+  issues is gone. Lists are never shortened. The PDF is A4 portrait now and
+  its URLs are clickable. The figures follow the
+  overview's "include external links" setting
+- The **CSV export** contains all data of a URL: redirect chain, MIME type
+  and content type, check time, linking pages, worst issue and all SEO
+  facts (titles, descriptions, robots, canonicals, headings, hreflang,
+  JSON-LD, images without alt text, mixed content, security headers …).
+  Several values in one cell are separated by line breaks
+- The **JSON export** additionally contains the figures of the overview
+  (`overview`)
+- Export menu: "JSON export" and "CSV export" instead of "JSON report" and
+  "CSV table"
+
 ## [1.2.0] - 2026-10-22
 
 ### Added
@@ -88,6 +125,7 @@ First public release.
 - English and German UI by system language
 - Static binaries for Linux (x86_64, arm64) and macOS (Apple Silicon)
 
+[1.3.0]: https://github.com/dlehmann/linkscout/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/dlehmann/linkscout/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/dlehmann/linkscout/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/dlehmann/linkscout/releases/tag/v1.0.0

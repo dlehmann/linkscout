@@ -81,7 +81,78 @@ make release    # dist/linkscout-{linux-amd64,linux-arm64,darwin-arm64}
   (fonts, scripts) – the privacy text promises that.
 - Screenshots in `docs/screenshots/*-{light,dark}.webp` were taken with
   headless Chrome (1280 px wide, English UI, check of dlehmann.github.io).
-  Retake them when the UI changes noticeably.
+  Retake them when the UI changes noticeably (details in the checklist).
+
+### Checklist for a new version
+
+Work through it completely – a release is not done when the tag is pushed.
+
+1. **Version number** (semver): major = incompatible change of the CLI
+   flags or of the JSON report format (it must stay readable by
+   `-recheck`, `-compare` and `/api/import`), minor = new features, patch =
+   fixes only.
+2. **Checks**: `make vet`, `make race`, `make build`; try the UI in German
+   and English (`-lang de|en`), light and dark, a phone-sized window, and
+   the exports (JSON, CSV, HTML, PDF, sitemap.xml, sitemap HTML).
+   New UI strings need an entry in every `lang_*.go` (the tests enforce it).
+   Now and then: bump the Firefox version in `fetch.FirefoxUA`.
+3. **CHANGELOG.md**: rename `[Unreleased]` to `[x.y.z] - YYYY-MM-DD`
+   (sections Added / Changed / Fixed / Removed, written for users), add a
+   new empty `[Unreleased]` only when work continues, and fix the link
+   references at the end (`[x.y.z]: …/compare/vPREV...vx.y.z`,
+   `[Unreleased]: …/compare/vx.y.z...HEAD`). This section becomes the
+   release notes.
+4. **README.md**: first paragraph, "What it is for", feature list, CLI
+   examples and the options table (compare with `linkscout -help`), the
+   screenshot tables (new screenshots go there too).
+5. **Website `docs/index.html`**: lead text, feature cards, the sections
+   with their screenshots (`width`/`height` attributes must match the
+   image files), the nav links, the CLI block, `<meta name="description">`
+   and the OpenGraph tags. `docs/impressum.html` (German) only when hosting
+   or privacy change. No external resources.
+6. **Screenshots** (whenever the UI changed visibly – compare every image
+   with the current UI, also the ones that seem unaffected):
+   - start an English instance (`./linkscout -lang en -no-browser -listen
+     127.0.0.1:<port>`), check `https://dlehmann.github.io/`, wait until
+     it is finished;
+   - headless Chrome with remote debugging (`google-chrome-stable
+     --headless=new --remote-debugging-port=… --hide-scrollbars`), via the
+     DevTools protocol: `Emulation.setDeviceMetricsOverride` (1280 wide,
+     scale 1), `Emulation.setEmulatedMedia` with `prefers-color-scheme`
+     light and dark, `Page.captureScreenshot`;
+   - replace the dev version in the footer by the release version
+     ("LinkScout 1.2.0-3-gabc-dirty" → "LinkScout 1.3.0") before capturing;
+   - files, each `-light` and `-dark`, WebP quality 82
+     (`magick in.png -quality 82 out.webp`):
+     `overview` (`#stats`, full page height), `seo` (`#stats`, 1280×900,
+     scrolled to `.seo-health` minus 80 px for the sticky header),
+     `sitemap` (`#sitemap`, 1280×900), `results` (`#results`, 1280×900),
+     `mirror` (`#mirror` with a few entries in the download list, 1280×900);
+   - the card of the profile README: `#stats` at 1600×900, resized to
+     1280×720 → `images/linkscout-{light,dark}.webp` in `dlehmann/dlehmann`.
+7. **AGENTS.md**: layout, design decisions and these notes for everything
+   new or changed.
+8. **Publish**: commit, `git push origin main`, then
+   `git tag -a vx.y.z -m "LinkScout x.y.z" && git push origin vx.y.z`.
+   Wait for the CI and Release workflows (`gh run watch`), then check the
+   release: three archives plus `SHA256SUMS`, notes = CHANGELOG section;
+   download one archive and run `linkscout -version`.
+9. **GitHub Pages** deploys `docs/` with the push; check
+   https://dlehmann.github.io/linkscout/ (new texts and images, phone
+   width without horizontal scrolling).
+10. **Profile repository `dlehmann/dlehmann`**: the card images (step 6) and
+    the one-line description of LinkScout in `README.md` when the features
+    changed.
+11. **Homepage `dlehmann/dlehmann.github.io`** (default branch is
+    `master`, not `main` – never push to `main` there): the short
+    description in the project list and the `<meta name="description">` of
+    `index.html` when they no longer fit, the `lastmod` of
+    `/linkscout/` in `sitemap.xml`.
+
+Pitfalls: pushing over SSH needs the Bitwarden SSH agent to be unlocked.
+The HTTPS fallback with the `gh` token cannot push changes to
+`.github/workflows/` (the token lacks the `workflow` scope) – such commits
+have to wait for SSH.
 
 ## Design decisions (keep consistent)
 
@@ -172,8 +243,9 @@ make release    # dist/linkscout-{linux-amd64,linux-arm64,darwin-arm64}
   website" (`#results`) and "Offline speichern"/"Save offline" (`#mirror`);
   inside the checker the sub-tabs (`.subtabs`) are the statistics
   ("Übersicht"/"Overview", `#stats`, first, including the SEO charts:
-  health by worst issue, title and description length) and the results
-  list (`#results`, always the last tab). There is no SEO tab any more:
+  health by worst issue, title and description length), the site
+  structure (`#sitemap`) and the results list (`#results`, always the last
+  tab). There is no SEO tab any more:
   issues are shown per URL (column, filter, details with `issueContext()`). The overview is always enabled (it shows a
   hint until there are results), is the default on a fresh start (no hash)
   and is what the "Website prüfen" nav button opens. German UI texts say
@@ -264,7 +336,49 @@ port. The user's own install is `make install PREFIX=$HOME/.local` (no sudo).
   PDF exports (`crawler.WriteCSV`, `server.WriteHTMLReport`,
   `server.WritePDFReport`, `GET /api/export?format=`) re-run Analyze, so they
   work with old reports too. The PDF writer (`server/pdf.go`) is hand-written
-  (no dependency): standard Helvetica fonts, WinAnsi encoding, A4 landscape.
+  (no dependency): standard Helvetica fonts, WinAnsi encoding, A4 portrait,
+  link annotations for URLs.
+
+## Site structure (Sitemap tab)
+
+- `crawler.SiteTree` builds the tree of `IsSitePage` results (internal,
+  200, no redirect, HTML) by URL path segments; directories without a page
+  of their own are nodes without URL, query strings are child nodes
+  (`/list?page=2` below `/list`). `GET /api/sitemap` serves it as JSON for
+  the tab (`renderSitemap()` refetches only when the results changed),
+  `format=xml` as sitemap.xml (`WriteSitemapXML`, protocol 0.9, max. 50,000
+  URLs, `lastmod` = `Result.LastModified` in UTC) and `format=html` as
+  nested list (`server/sitemap.go`). Pages with `noindex`,
+  `canonical_other` or robots.txt block are marked (`SiteNode.Excluded`) and
+  left out of sitemap.xml – the handler runs Analyze first. Search engines
+  only accept URLs of the property the sitemap belongs to, so
+  `WriteSitemapXML` rewrites every URL to `SiteNode.Origin` (scheme + host
+  of the start page after redirects, else the most common one) and drops
+  the duplicates this creates; tree and HTML export keep the URLs as found.
+- `Result.LastModified` is the Last-Modified header of a 2xx response
+  (`fetch.Response.LastModified`); it is shown in the list, the details,
+  the reports and the exports.
+
+## Reports and exports
+
+- JSON (`crawler.Report`, incl. `overview`) and CSV (`crawler.CSVHeader`:
+  every field of a result and of its `PageSEO` except the element ids;
+  several values per cell separated by newlines) carry all data.
+- HTML and PDF show the overview and the detail view of every URL, nothing
+  else (the separate SEO issue list was removed on request). Both render
+  `server.reportView` (`reportview.go`), built once and translated:
+  `crawler.NewOverview` (`crawler/overview.go`) computes the figures of
+  the overview page – it mirrors `summarize`/`renderStats`/`seoCharts` in
+  `app.js`, and `detailBuilder` mirrors `openDetail`/`seoRows`/
+  `issueContext`. Change both sides together.
+- `external=1` on `/api/export` counts external links in the figures; the
+  UI sets it from the overview checkbox (`updateExportLinks`). The CLI
+  leaves them out, like the UI default.
+- Reports never shorten a list (on request): every linking page, every
+  entry of an issue context and of the bar lists is shown, unlike the
+  detail dialog of the UI, which caps issue context lists at 10. In the PDF
+  long bar lists continue on the next page (`drawBarsFlow`), detail values
+  wrap and break across pages line by line.
 
 ## JSON report format
 

@@ -87,6 +87,7 @@
       <nav>
         <a href="#features">Features</a>
         <a href="#seo">SEO</a>
+        <a href="#sitemap">Sitemap</a>
         <a href="#offline">Offline copies</a>
         <a href="#install">Install</a>
         <a href="https://github.com/dlehmann/linkscout">GitHub</a>
@@ -122,7 +123,7 @@
         <div class="card"><h3>Sortable, filterable list</h3><p>URL, status, MIME type, title, kind, clicks, size, time and SEO issues – filter by every value, open details with redirect chain, SEO data and the pages that link to a URL.</p></div>
         <div class="card"><h3>Sitemap and robots.txt</h3><p>The URLs of your sitemap are checked too – pages that are listed there but linked nowhere show up as orphans. URLs blocked by robots.txt are marked.</p></div>
         <div class="card"><h3>Compare runs</h3><p>Compare the results with an earlier report: new and removed URLs, changed status codes, new and fixed SEO issues.</p></div>
-        <div class="card"><h3>Export and re-check</h3><p>Export as JSON, CSV, a self-contained HTML report or PDF, import a report later and re-check only the URLs that failed – or everything.</p></div>
+        <div class="card"><h3>Export and re-check</h3><p>HTML and PDF reports with every chart of the overview and the details of each URL; JSON and CSV exports with all data. Import a report later and re-check only the URLs that failed – or everything.</p></div>
         <div class="card"><h3>Password protected sites</h3><p>HTTP Basic authentication is supported. Credentials are only sent to the checked site and never stored in reports.</p></div>
       </div>
     </div>
@@ -156,6 +157,26 @@
         <picture>
           <source media="(prefers-color-scheme: dark)" srcset="screenshots/seo-dark.webp">
           <img src="screenshots/seo-light.webp" width="1280" height="900" alt="SEO health of the pages and length of titles and meta descriptions" loading="lazy">
+        </picture>
+      </div>
+    </div>
+  </section>
+
+  <section id="sitemap">
+    <div class="wrap split">
+      <div>
+        <h2>Site structure and sitemap.xml</h2>
+        <p>The <em>Sitemap</em> tab shows every internal page as a tree by its URL path – with title, last modification date and the number of pages below each folder. A click on a page shows its details.</p>
+        <ul>
+          <li><b>sitemap.xml for Google:</b> ready for the Search Console, with <code>lastmod</code> from the server's Last-Modified header.</li>
+          <li><b>Only what belongs there:</b> pages with <code>noindex</code>, another canonical URL or blocked by robots.txt are marked and left out.</li>
+          <li><b>As HTML:</b> the tree as nested list, e.g. as a starting point for a sitemap page.</li>
+        </ul>
+      </div>
+      <div class="shot">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="screenshots/sitemap-dark.webp">
+          <img src="screenshots/sitemap-light.webp" width="1280" height="900" alt="Site structure as tree with export of sitemap.xml and HTML" loading="lazy">
         </picture>
       </div>
     </div>

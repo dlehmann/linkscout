@@ -30,6 +30,7 @@ the checked site.
   `noindex` pages, broken canonicals, orphan pages from the sitemap, broken
   anchors, images without alt text, hreflang mistakes and more
 - **Compare** two runs: what is new, what is gone, what broke, what got fixed
+- Generate a **sitemap.xml** for Google from the pages that are really there
 - **Re-check** only the URLs that failed after fixing them, without crawling the whole site again
 - Archive websites or take them along **offline**
 - Run it in scripts or CI: a headless mode writes a JSON report and can fail the build
@@ -52,12 +53,17 @@ the checked site.
   headers, certificate expiry and URL hygiene. The results list shows and
   filters them per URL; the details of a URL explain every issue with what
   exactly was found (lengths, affected images, pages with the same title …)
+- **Site structure:** the *Sitemap* tab shows the internal HTML pages as a
+  tree by their URL path, with title and last modification date. It exports
+  a `sitemap.xml` for Google Search Console (with `lastmod` from the
+  server's Last-Modified header, without `noindex` pages, pages with another
+  canonical URL and pages blocked by robots.txt) and the tree as HTML list
 - **sitemap.xml and robots.txt:** after the link crawl the URLs of the
   sitemap are checked too, pages only listed there appear as *not linked*.
   URLs blocked by robots.txt are marked but still checked
 - **Results list** with URL, HTTP status, MIME type, title, kind (internal /
-  external / file), clicks from the start page, size, response time and SEO
-  issues;
+  external / file), clicks from the start page, last modification date
+  (Last-Modified), size, response time and SEO issues;
   sortable, with full-text search and a filter for every column. Long URLs are
   shortened at the start, the full URL is in the tooltip. A click on a row
   shows details such as the redirect chain and the pages that link to the URL
@@ -69,9 +75,12 @@ the checked site.
   password under *Advanced settings*, or `-user`/`-password` on the command
   line. The credentials are only sent to the checked site, never to external
   links or CDNs, and the password never appears in exports
-- **Export** as JSON, CSV, a self-contained HTML report or PDF; JSON import;
-  **check again** only the URLs without status 200, or everything;
-  **compare** with an earlier report
+- **Reports and exports:** a self-contained HTML report and a PDF report
+  with every figure and chart of the overview and the details of each URL
+  (redirect chain, linking pages, every SEO issue with what was found);
+  a JSON export and a CSV export with all data of every URL, including the
+  SEO facts. JSON import; **check again** only the URLs without status 200,
+  or everything; **compare** with an earlier report
 - **Save offline:** downloads pages, images, CSS, JavaScript, fonts, videos
   and documents (also from CDNs), rewrites the links to relative paths and
   offers the copy as folder or ZIP. A **download list** takes several websites,
@@ -89,9 +98,9 @@ the checked site.
 |---|---|
 | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/seo-dark.webp"><img src="docs/screenshots/seo-light.webp" alt="SEO health and length of titles and descriptions"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/results-dark.webp"><img src="docs/screenshots/results-light.webp" alt="Results list with filters"></picture> |
 
-| Save offline |
-|---|
-| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/mirror-dark.webp"><img src="docs/screenshots/mirror-light.webp" alt="Download list for offline copies"></picture> |
+| Site structure | Save offline |
+|---|---|
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/sitemap-dark.webp"><img src="docs/screenshots/sitemap-light.webp" alt="Site structure as tree with sitemap.xml export"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/mirror-dark.webp"><img src="docs/screenshots/mirror-light.webp" alt="Download list for offline copies"></picture> |
 
 ## Installation
 
