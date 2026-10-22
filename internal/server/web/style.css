@@ -309,10 +309,22 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 0 24
 .job.failed .progress-text { color: var(--bad); }
 .fill.failed { background: var(--bad); }
 .job-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+/* URLs of a job that did not answer with 200: marked in amber, expandable */
+.job details.problems { margin-top: 8px; font-size: 12px; }
+.job details.problems > summary { cursor: pointer; color: var(--warn); font-weight: 600; }
+.job details.problems > summary::before { content: "⚠ "; }
+.job details.problems ul { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.job details.problems li { padding: 6px 10px; border-top: 1px solid var(--border); }
+.job details.problems li:first-child { border-top: 0; }
+.problem-head { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.problem-head a { word-break: break-all; }
+.problem-meta, .problem-source { color: var(--muted); margin-top: 2px; word-break: break-all; }
+.problem-meta .saved { color: var(--ok); }
+.problem-meta .not-saved { color: var(--bad); }
 .mono { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
 
 @media (max-width: 720px) {
-  .job { flex-direction: column; gap: 8px; }
+  .job { flex-direction: column; gap: 8px; align-items: stretch; } /* full width, the nowrap UA line is cut */
   .job-actions { justify-content: flex-start; }
 }
 .intro { margin-top: 0; }

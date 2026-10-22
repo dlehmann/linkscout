@@ -226,7 +226,8 @@ func TestMirrorAndZip(t *testing.T) {
 		t.Fatalf("mirror: %d %s", resp.StatusCode, body)
 	}
 	waitIdle(t, s)
-	if jobs := s.mirrors.views(); len(jobs) != 1 || jobs[0].Status != JobDone || jobs[0].Progress.Files != 3 {
+	if jobs := s.mirrors.views(); len(jobs) != 1 || jobs[0].Status != JobDone || jobs[0].Progress.Files != 4 ||
+		len(jobs[0].Progress.Problems) != 1 || jobs[0].Progress.Problems[0].Status != 404 || !jobs[0].Progress.Problems[0].Saved {
 		t.Errorf("mirror jobs = %+v", jobs)
 	}
 	resp, body = do(t, "GET", ui.URL+"/api/mirror/zip", nil)
@@ -241,7 +242,7 @@ func TestMirrorAndZip(t *testing.T) {
 	for _, f := range zr.File {
 		names = append(names, f.Name)
 	}
-	if strings.Join(names, ",") != "a.png,index.html,ok/index.html" {
+	if strings.Join(names, ",") != "a.png,broken,index.html,ok/index.html" { // the 404 page is kept
 		t.Errorf("zip entries: %v", names)
 	}
 }
@@ -325,6 +326,21 @@ func TestMirrorList(t *testing.T) {
 	}
 }
 
+// An internationalised host name is stored in its Punycode form, also in the
+// target directory made from the template.
+func TestMirrorPunycode(t *testing.T) {
+	s, ui := newUI(t, i18n.EN)
+	base := t.TempDir()
+	resp, body := do(t, "POST", ui.URL+"/api/mirror/queue", MirrorRequest{URL: "https://Müller.de/über", OutDir: filepath.Join(base, "<host>")})
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("queue: %d %s", resp.StatusCode, body)
+	}
+	j := s.mirrors.views()[0]
+	if j.URL != "https://xn--mller-kva.de/%C3%BCber" || j.OutDir != filepath.Join(base, "xn--mller-kva.de") {
+		t.Errorf("job = %s → %s", j.URL, j.OutDir)
+	}
+}
+
 func TestMirrorListStop(t *testing.T) {
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
@@ -355,6 +371,7 @@ func TestExpandMirrorDir(t *testing.T) {
 		{"/d/<domain>/<date>-<time>", "https://WWW.example.com:8443/x", "/d/example.com/2026-10-21-153012"},
 		{"/d/<host>", "http://a/../b", "/d/a"},
 		{"/d/plain", "https://example.com", "/d/plain"},
+		{"/d/<host>/<domain>", "https://www.müller.de/x", "/d/www.xn--mller-kva.de/xn--mller-kva.de"},
 	} {
 		if got := ExpandMirrorDir(c.tpl, c.url, now); got != c.want {
 			t.Errorf("ExpandMirrorDir(%q, %q) = %q, want %q", c.tpl, c.url, got, c.want)

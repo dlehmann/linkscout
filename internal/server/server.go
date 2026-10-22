@@ -410,7 +410,7 @@ func (s *Server) addMirror(w http.ResponseWriter, r *http.Request, start bool) {
 		s.fail(w, http.StatusBadRequest, err)
 		return
 	}
-	norm, ok := links.Normalize(req.URL, nil)
+	norm, ok := links.Normalize(links.ToASCII(req.URL), nil) // müller.de → xn--mller-kva.de, also for <host>
 	if !ok {
 		s.fail(w, http.StatusBadRequest, errors.New(i18n.T(s.opts.Lang, "error.no_url")))
 		return
@@ -559,6 +559,7 @@ func DefaultMirrorTemplate(base string) string {
 func ExpandMirrorDir(tpl, startURL string, now time.Time) string {
 	host, domain := "site", "site"
 	if u, err := url.Parse(startURL); err == nil && u.Host != "" {
+		u.Host = links.ASCIIHost(u.Host) // müller.de → xn--mller-kva.de
 		host = sanitizeName(u.Host)
 		domain = sanitizeName(strings.TrimPrefix(strings.ToLower(u.Hostname()), "www."))
 	}

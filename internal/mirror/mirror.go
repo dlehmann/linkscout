@@ -63,6 +63,21 @@ type Progress struct {
 	Error      string    `json:"error,omitempty"`
 	StartedAt  time.Time `json:"startedAt,omitempty"`
 	FinishedAt time.Time `json:"finishedAt,omitempty"`
+	// Problems lists every URL that did not answer with status 200, in the
+	// order they were processed (sorted by URL once the run has ended).
+	Problems []Problem `json:"problems,omitempty"`
+}
+
+// Problem is a URL that could not be downloaded cleanly. Pages and files
+// with another status than 200 are still saved when they have a body (an
+// error page is part of the site), Saved tells whether that happened.
+type Problem struct {
+	URL      string `json:"url"`
+	Source   string `json:"source,omitempty"` // page that linked to the URL
+	Status   int    `json:"status,omitempty"` // final HTTP status, 0 on transport errors
+	Error    string `json:"error,omitempty"`  // transport error
+	TooLarge bool   `json:"tooLarge,omitempty"`
+	Saved    bool   `json:"saved"`
 }
 
 // tmpDirName is the directory inside the target directory where phase 1
@@ -77,7 +92,7 @@ type entry struct {
 	tmp      string
 	ctype    string
 	size     int64
-	ok       bool   // downloaded with status 200
+	ok       bool   // downloaded (also with a status other than 200)
 	final    string // URL after redirects; relative links in the file resolve against it
 	local    string // relative output path, set in phase 2
 }
@@ -103,7 +118,7 @@ type run struct {
 // Run mirrors the website synchronously. notify (optional) is called with
 // progress snapshots. The returned Progress is the final state.
 func Run(ctx context.Context, cfg Config, notify func(Progress)) (Progress, error) {
-	norm, ok := links.Normalize(cfg.StartURL, nil)
+	norm, ok := links.Normalize(links.ToASCII(cfg.StartURL), nil)
 	if !ok {
 		return Progress{}, errors.New("invalid start URL")
 	}
@@ -165,6 +180,11 @@ func (r *run) finish(err error) (Progress, error) {
 	defer r.mu.Unlock()
 	r.prog.Running = false
 	r.prog.FinishedAt = time.Now()
+	// Sort a copy: earlier snapshots share the backing array and may still
+	// be read (JSON encoding of /api/state).
+	probs := append([]Problem(nil), r.prog.Problems...)
+	sort.Slice(probs, func(i, j int) bool { return probs[i].URL < probs[j].URL })
+	r.prog.Problems = probs
 	if err != nil {
 		r.prog.Error = err.Error()
 	}
@@ -175,6 +195,9 @@ func (r *run) finish(err error) (Progress, error) {
 
 // add registers a URL and starts its download. r.mu must be held.
 func (r *run) add(ctx context.Context, u, source string, page bool) {
+	// Internationalised host names are stored and requested in their ASCII
+	// form, so müller.de and xn--mller-kva.de are the same site and file.
+	u = links.ToASCII(u)
 	if e, ok := r.entries[u]; ok {
 		if page && !e.page && !e.external {
 			// first seen as resource, now as page: nothing to do, the content
@@ -237,12 +260,20 @@ func (r *run) download(ctx context.Context, e *entry, source string) {
 	resp := r.client.Download(ctx, e.url, source, f, r.cfg.MaxFileSize)
 	f.Close()
 	// A file at the size limit was cut off: a broken copy is worse than the
-	// online link the page keeps instead.
+	// online link the page keeps instead. Pages with another status than
+	// 200 are kept when they have a body (custom error pages, sites that
+	// answer every page with 404) and listed as problems; the error body of
+	// an image, script or stylesheet would be no use as that file.
 	tooLarge := resp.Size >= r.cfg.MaxFileSize
-	if resp.Err != nil || resp.Status != 200 || tooLarge {
+	keepError := e.page && resp.Size > 0
+	if resp.Err != nil || tooLarge || resp.Status != 200 && !keepError {
 		os.Remove(tmpPath)
+		r.problem(e, source, resp, tooLarge, false)
 		r.done(e, 0)
 		return
+	}
+	if resp.Status != 200 {
+		r.problem(e, source, resp, false, true)
 	}
 
 	r.mu.Lock()
@@ -285,6 +316,17 @@ func (r *run) download(ctx context.Context, e *entry, source string) {
 		}
 	}
 	r.done(e, resp.Size)
+}
+
+// problem records a URL that did not answer with status 200.
+func (r *run) problem(e *entry, source string, resp fetch.Response, tooLarge, saved bool) {
+	p := Problem{URL: e.url, Source: source, Status: resp.Status, TooLarge: tooLarge, Saved: saved}
+	if resp.Err != nil {
+		p.Error = resp.Err.Error()
+	}
+	r.mu.Lock()
+	r.prog.Problems = append(r.prog.Problems, p)
+	r.mu.Unlock()
 }
 
 // done counts a processed URL (downloaded or failed) and reports progress.

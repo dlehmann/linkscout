@@ -105,11 +105,27 @@ func testSite(t *testing.T) (site, cdn string) {
 		<a href="list.php?page=2">List</a>
 		<a href="https://elsewhere.example/">Elsewhere</a>
 		<a href="missing">Missing</a>
+		<a href="gone">Gone</a>
+		<a href="empty">Empty</a>
 		<a href="mailto:x@y.z">Mail</a>
 		<img src="img/logo.png" srcset="img/logo.png 1x, img/logo@2x.png 2x">
 		<div style="background:url(img/bg.png)"></div>
 		</body></html>`))
 	mux.HandleFunc("/about", page(`<title>About</title><a href="/">Home</a><a href="/files/doc.pdf">Doc</a><img src="/img/logo.png">`))
+	// A custom error page is part of the site: saved and parsed anyway.
+	mux.HandleFunc("/gone", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusGone)
+		fmt.Fprint(w, `<title>Gone</title><a href="/">Home</a><img src="/img/gone.png"><img src="/img/broken.png">`)
+	})
+	mux.HandleFunc("/img/gone.png", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Write([]byte("PNG"))
+	})
+	mux.HandleFunc("/img/broken.png", http.NotFound) // resource: error body not saved
+	mux.HandleFunc("/empty", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
 	mux.HandleFunc("/list.php", page(`<title>List</title><a href="/about">About</a>`))
 	mux.HandleFunc("/css/site.css", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/css")
@@ -167,7 +183,8 @@ func TestMirrorRun(t *testing.T) {
 		`srcset="img/logo.png 1x, img/logo@2x.png 2x"`,
 		`url(&#34;img/bg.png&#34;)`,
 		`href="https://elsewhere.example/"`,
-		`href="` + site + `/missing"`, // 404 → stays absolute
+		`href="gone/index.html"`,    // 410 with content → saved
+		`href="` + site + `/empty"`, // 500 without body → stays absolute
 		`href="mailto:x@y.z"`,
 		`src="_external/` + sanitize(strings.TrimPrefix(cdn, "http://")) + `/lib.js"`, // host:port → host_port
 	} {
@@ -193,6 +210,24 @@ func TestMirrorRun(t *testing.T) {
 	for _, f := range []string{"css/print.css", "img/logo@2x.png", "fonts/f.woff2", "files/doc.pdf"} {
 		read(t, dir, f)
 	}
+	gone := read(t, dir, "gone/index.html")
+	if !strings.Contains(gone, `href="../index.html"`) || !strings.Contains(gone, `src="../img/gone.png"`) {
+		t.Errorf("error page not rewritten:\n%s", gone)
+	}
+	read(t, dir, "img/gone.png") // linked only from the error page
+	if !strings.Contains(gone, `src="`+site+`/img/broken.png"`) {
+		t.Errorf("broken image must stay absolute:\n%s", gone)
+	}
+	want := []Problem{
+		{URL: site + "/empty", Source: site + "/", Status: 500},
+		{URL: site + "/gone", Source: site + "/", Status: 410, Saved: true},
+		{URL: site + "/img/broken.png", Source: site + "/gone", Status: 404},
+		{URL: site + "/missing", Source: site + "/", Status: 404, Saved: true},
+	}
+	if fmt.Sprint(p.Problems) != fmt.Sprint(want) {
+		t.Errorf("problems = %+v\nwant %+v", p.Problems, want)
+	}
+
 	// list.php?page=2 is stored with a hashed query suffix and linked.
 	matches, _ := filepath.Glob(filepath.Join(dir, "list.php_q*.html"))
 	if len(matches) != 1 {

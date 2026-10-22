@@ -502,5 +502,21 @@ func runMirror(ctx context.Context, lang i18n.Lang, cfg mirror.Config) int {
 		return 1
 	}
 	fmt.Fprintf(os.Stderr, i18n.T(lang, "cli.mirror_done")+"\n", p.OutDir, p.Files)
+	if len(p.Problems) > 0 {
+		fmt.Fprintf(os.Stderr, i18n.T(lang, "cli.mirror_problems")+"\n", len(p.Problems))
+		for _, pr := range p.Problems {
+			what := pr.Error
+			switch {
+			case pr.TooLarge:
+				what = i18n.T(lang, "cli.mirror_too_large")
+			case what == "":
+				what = fmt.Sprintf("HTTP %d", pr.Status)
+			}
+			if pr.Saved {
+				what += " – " + i18n.T(lang, "cli.mirror_saved")
+			}
+			fmt.Fprintf(os.Stderr, "  %s  %s\n", pr.URL, what)
+		}
+	}
 	return 0
 }

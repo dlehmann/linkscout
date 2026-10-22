@@ -191,6 +191,26 @@
     renderDirPreview();
   }
 
+  /**
+   * Write an internationalised host name in its Punycode form
+   * (https://müller.de/a → https://xn--mller-kva.de/a), like links.ToASCII on
+   * the server. Only the host changes; text that is no URL stays as it is.
+   */
+  function asciiURL(v) {
+    const m = /^(\s*[a-z][a-z0-9+.-]*:\/\/(?:[^/?#@]*@)?)([^/?#]*)(.*)$/is.exec(v);
+    if (!m || /^[\x00-\x7f]*$/.test(m[2])) return v;
+    try { return m[1] + new URL(`http://${m[2]}`).host + m[3]; } catch { return v; }
+  }
+
+  /**
+   * URL for display: percent-encoded characters of the path and query
+   * (%C3%BC) are shown as typed (ü). decodeURI keeps reserved characters
+   * such as %2F encoded; malformed sequences leave the URL as it is.
+   */
+  function readableURL(u) {
+    try { return decodeURI(u); } catch { return u; }
+  }
+
   /** Same replacement as server.ExpandMirrorDir, for the live preview. */
   function expandDir(tpl, url) {
     let host = "example.com", domain = "example.com";
@@ -265,6 +285,7 @@
   async function addMirror(start) {
     showError("");
     const f = mform;
+    f.url.value = asciiURL(f.url.value); // Enter submits before "change" fires
     try {
       state = await api("POST", start ? "/api/mirror" : "/api/mirror/queue", {
         url: f.url.value.trim(),
@@ -302,6 +323,10 @@
 
   mform.addEventListener("submit", (e) => { e.preventDefault(); addMirror(e.submitter?.name === "start"); });
   mform.url.addEventListener("input", renderDirPreview);
+  mform.url.addEventListener("change", () => { // not while typing: the cursor would jump
+    const v = asciiURL(mform.url.value);
+    if (v !== mform.url.value) { mform.url.value = v; renderDirPreview(); }
+  });
   mform.outDir.addEventListener("input", renderDirPreview);
   $("#btn-reset-dir").addEventListener("click", () => { mform.outDir.value = init.defaults?.mirrorDir || ""; renderDirPreview(); });
   $("#btn-mirror-reset-ua").addEventListener("click", () => { mform.userAgent.value = init.firefoxUA; });
@@ -1277,6 +1302,7 @@
 
     const list = $("#mirror-jobs");
     const html = jobs.map(jobHTML).join("");
+    // jobHTML reads ui.openProblems, so an open error list stays open while polling.
     if (list.dataset.html !== html) { // keep focus and hover while polling
       list.innerHTML = html;
       list.dataset.html = html;
@@ -1312,15 +1338,45 @@
     ].join("");
     return `<li data-id="${j.id}" class="job ${st}">
       <div class="job-main">
-        <div class="job-url">${esc(j.url)}</div>
+        <div class="job-url" title="${esc(j.url)}">${esc(readableURL(j.url))}</div>
         <div class="job-meta"><span class="mono">${esc(j.outDir)}</span></div>
         <div class="job-meta">${settings}</div>
         <div class="job-meta ua" title="${esc(j.userAgent)}">${esc(j.userAgent)}</div>
         <div class="bar"><div class="fill${st === "done" ? " done" : st === "failed" ? " failed" : ""}" style="width:${pct}%"></div></div>
         <div class="progress-text">${esc(text)}</div>
+        ${problemsHTML(j)}
       </div>
       <div class="job-actions">${actions}</div>
     </li>`;
+  }
+
+  /** IDs of jobs whose error list is expanded (kept across re-renders). */
+  const openProblems = new Set();
+  $("#mirror-jobs").addEventListener("toggle", (e) => {
+    const d = e.target;
+    if (!d.matches?.("details.problems")) return;
+    const id = +d.closest("li").dataset.id;
+    if (d.open) openProblems.add(id); else openProblems.delete(id);
+  }, true); // toggle does not bubble
+
+  /** Expandable list of the URLs of a job that did not answer with status 200. */
+  function problemsHTML(j) {
+    const probs = j.progress?.problems || [];
+    if (!probs.length) return "";
+    const items = probs.map((p) => {
+      const what = p.tooLarge ? t("mirror.problem_too_large") : p.error || `HTTP ${p.status}`;
+      const cls = p.status ? `s${Math.floor(p.status / 100)}xx` : "serror";
+      const saved = p.saved ? t("mirror.problem_saved") : t("mirror.problem_not_saved");
+      const src = p.source ? `<div class="problem-source">${esc(t("mirror.problem_source", { url: readableURL(p.source) }))}</div>` : "";
+      return `<li><div class="problem-head"><span class="badge ${cls}">${esc(p.status || "ERR")}</span>
+        <a href="${esc(p.url)}" class="mono">${esc(readableURL(p.url))}</a></div>
+        <div class="problem-meta">${esc(what)} · <span class="${p.saved ? "saved" : "not-saved"}">${esc(saved)}</span></div>${src}</li>`;
+    }).join("");
+    return `<details class="problems"${openProblems.has(j.id) ? " open" : ""}>
+      <summary>${esc(t("mirror.problems", { count: fmtNum(probs.length) }))}</summary>
+      <p class="hint">${esc(t("mirror.problems_hint"))}</p>
+      <ul>${items}</ul>
+    </details>`;
   }
 
   // Links to other pages never replace the LinkScout window, wherever they
