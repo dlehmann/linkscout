@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -629,5 +630,59 @@ func TestHTMLReportEscapes(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), "<script>alert") {
 		t.Error("title not escaped")
+	}
+}
+
+// The PDF report is a valid, self-contained PDF: header, one page object per
+// page, a cross-reference table whose offsets point at the objects, the two
+// standard fonts and the escaped texts.
+func TestPDFReport(t *testing.T) {
+	rep := crawler.Report{StartURL: "https://e.com/", Generator: "LinkScout test",
+		Issues: []crawler.IssueCount{{IssueDef: crawler.IssueDef{ID: "title_missing", Severity: crawler.SevError}, Count: 1}}}
+	for i := 0; i < 120; i++ { // enough rows for several pages
+		rep.Results = append(rep.Results, crawler.Result{URL: fmt.Sprintf("https://e.com/seite-%d", i), Status: 200,
+			MimeType: "text/html", Title: "Größe (Ü) – Test", Issues: []string{"title_missing"}})
+	}
+	var buf bytes.Buffer
+	if err := WritePDFReport(&buf, rep, i18n.DE); err != nil {
+		t.Fatal(err)
+	}
+	pdf := buf.String()
+	if !strings.HasPrefix(pdf, "%PDF-1.4") || !strings.HasSuffix(pdf, "%%EOF\n") {
+		t.Fatal("not a PDF")
+	}
+	pages := strings.Count(pdf, "/Type /Page ")
+	if pages < 3 {
+		t.Errorf("%d pages for 120 rows", pages)
+	}
+	if !strings.Contains(pdf, "/BaseFont /Helvetica-Bold") || !strings.Contains(pdf, "/Count "+fmt.Sprint(pages)) {
+		t.Error("fonts or page count missing")
+	}
+	// "Größe (Ü) – Test": umlauts as WinAnsi octal escapes, parentheses escaped
+	if !strings.Contains(pdf, `Gr\366\337e \(\334\) \226 Test`) {
+		t.Error("text not encoded as WinAnsi")
+	}
+	// every xref entry points at "n 0 obj"
+	i := strings.LastIndex(pdf, "\nxref\n")
+	lines := strings.Split(pdf[i+6:], "\n")
+	var count int
+	fmt.Sscanf(lines[0], "0 %d", &count)
+	for n := 1; n < count; n++ {
+		off, _ := strconv.Atoi(strings.Fields(lines[1+n])[0])
+		if !strings.HasPrefix(pdf[off:], fmt.Sprintf("%d 0 obj", n)) {
+			t.Fatalf("xref entry %d points to %q", n, pdf[off:off+10])
+		}
+	}
+}
+
+func TestPDFHelpers(t *testing.T) {
+	if got := fit("https://e.com/a/very/long/path/page.html", 60, 8, false, true); !strings.HasPrefix(got, "…") || !strings.HasSuffix(got, "page.html") {
+		t.Errorf("fit from start = %q", got)
+	}
+	if got := fit("short", 100, 8, false, false); got != "short" {
+		t.Errorf("fit = %q", got)
+	}
+	if pdfString("a → b ✓") != "a > b ?" {
+		t.Errorf("pdfString = %q", pdfString("a → b ✓"))
 	}
 }

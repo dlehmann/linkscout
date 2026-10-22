@@ -10,7 +10,7 @@
 //	GET  /api/state         progress, results, statistics, mirror progress
 //	POST /api/check         start a check {mode:"all"|"failed", url, referer, …}
 //	POST /api/stop          stop the running check
-//	GET  /api/export        download the report (?format=json|csv|html, default json)
+//	GET  /api/export        download the report (?format=json|csv|html|pdf, default json)
 //	POST /api/compare       compare the results with an earlier JSON report (body)
 //	POST /api/import        load a JSON report (to re-check it later)
 //	POST /api/mirror        add an offline copy to the list and start it {url, outDir, external, …}
@@ -320,7 +320,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	rep := crawler.NewReport(s.crawler, "LinkScout "+s.opts.Version)
 	format := r.URL.Query().Get("format")
-	if format != "csv" && format != "html" {
+	if format != "csv" && format != "html" && format != "pdf" {
 		format = "json"
 	}
 	name := "linkscout-report." + format
@@ -335,6 +335,9 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	case "html":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		WriteHTMLReport(w, rep, s.opts.Lang)
+	case "pdf":
+		w.Header().Set("Content-Type", "application/pdf")
+		WritePDFReport(w, rep, s.opts.Lang)
 	default:
 		writeJSON(w, http.StatusOK, rep)
 	}

@@ -70,13 +70,14 @@
           </div>
           <button type="button" id="btn-stop" class="danger" data-i18n="form.stop"></button>
           <span class="spacer"></span>
-          <!-- export in three formats; JSON can be imported and compared again -->
+          <!-- export formats; JSON can be imported and compared again -->
           <details class="menu" id="export-menu">
             <summary class="button" data-i18n="form.export_menu"></summary>
             <div class="menu-items">
               <a href="/api/export?format=json" download data-i18n="form.export_json"></a>
               <a href="/api/export?format=csv" download data-i18n="form.export_csv"></a>
               <a href="/api/export?format=html" download data-i18n="form.export_html"></a>
+              <a href="/api/export?format=pdf" download data-i18n="form.export_pdf"></a>
             </div>
           </details>
           <label class="button ghost" id="btn-compare"><span data-i18n="form.compare"></span><input type="file" accept="application/json,.json" hidden></label>
@@ -93,8 +94,8 @@
     <!-- Sub-tabs of the link checker -->
     <nav class="subtabs" id="subtabs" role="tablist">
       <button role="tab" data-tab="stats" data-i18n="tab.stats"></button>
+      <!-- the results list stays the last tab -->
       <button role="tab" data-tab="results" data-i18n="tab.list"></button>
-      <button role="tab" data-tab="seo" data-i18n="tab.seo"></button>
     </nav>
 
     <!-- Results -->
@@ -108,6 +109,8 @@
         <label class="filter"><span data-i18n="filter.label_depth"></span><select id="f-depth"></select></label>
         <label class="filter"><span data-i18n="filter.label_time"></span><select id="f-time"></select></label>
         <label class="filter"><span data-i18n="filter.label_issue"></span><select id="f-issue"></select></label>
+        <label class="filter"><span data-i18n="filter.label_tlen"></span><select id="f-tlen"></select></label>
+        <label class="filter"><span data-i18n="filter.label_dlen"></span><select id="f-dlen"></select></label>
         <button type="button" class="ghost small" id="f-reset" data-i18n="filter.reset"></button>
       </div>
       <!-- two-line list: URL on the first line, the values on the second -->
@@ -129,10 +132,6 @@
       <div id="stats-body"></div>
     </section>
 
-    <!-- SEO issues (rendered by renderSeo) -->
-    <section class="tab-panel" id="tab-seo">
-      <div id="seo-body"></div>
-    </section>
 
     <!-- Offline copy -->
     <section class="tab-panel" id="tab-mirror">

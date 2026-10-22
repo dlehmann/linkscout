@@ -166,12 +166,15 @@ make release    # dist/linkscout-{linux-amd64,linux-arm64,darwin-arm64}
   `index.html` (placeholder `/*__INITIAL_STATE__*/null`, JSON escaped by
   `json.Marshal` so `</script>` cannot break out). The page polls
   `/api/state` while a job runs. Tabs are addressed by URL hash (`#results`,
-  `#stats`, `#seo`, `#mirror`) – do not give DOM elements these ids, the
+  `#stats`, `#mirror`; the former `#seo` maps to `#stats`) – do not give DOM
+  elements these ids, the
   browser would scroll to them. The nav shows only "Website prüfen"/"Check
   website" (`#results`) and "Offline speichern"/"Save offline" (`#mirror`);
   inside the checker the sub-tabs (`.subtabs`) are the statistics
-  ("Übersicht"/"Overview", `#stats`, first), the results list (`#results`)
-  and the SEO checks (`#seo`). The overview is always enabled (it shows a
+  ("Übersicht"/"Overview", `#stats`, first, including the SEO charts:
+  health by worst issue, title and description length) and the results
+  list (`#results`, always the last tab). There is no SEO tab any more:
+  issues are shown per URL (column, filter, details with `issueContext()`). The overview is always enabled (it shows a
   hint until there are results), is the default on a fresh start (no hash)
   and is what the "Website prüfen" nav button opens. German UI texts say
   "Offline-Kopie" (not "Offline-Abbild").
@@ -257,9 +260,11 @@ port. The user's own install is `make install PREFIX=$HOME/.local` (no sudo).
   indexes and .gz followed, limits in robots.go) are added *after* the link
   crawl; URLs not reached by links get `Depth = NotLinked (-1)` = orphans,
   and so do the pages only linked from orphans.
-- `POST /api/compare` / `-compare` (`crawler.Compare`) and the CSV / HTML
-  exports (`crawler.WriteCSV`, `server.WriteHTMLReport`, `GET
-  /api/export?format=`) re-run Analyze, so they work with old reports too.
+- `POST /api/compare` / `-compare` (`crawler.Compare`) and the CSV / HTML /
+  PDF exports (`crawler.WriteCSV`, `server.WriteHTMLReport`,
+  `server.WritePDFReport`, `GET /api/export?format=`) re-run Analyze, so they
+  work with old reports too. The PDF writer (`server/pdf.go`) is hand-written
+  (no dependency): standard Helvetica fonts, WinAnsi encoding, A4 landscape.
 
 ## JSON report format
 

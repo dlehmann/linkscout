@@ -26,7 +26,7 @@
 
   // UI-only state; sort and filters survive a reload via localStorage.
   const ui = Object.assign(
-    { tab: "stats", sortKey: "", sortDesc: false, search: "", kind: "", status: "", type: "", depth: "", time: "", issue: "", statsExternal: false },
+    { tab: "stats", sortKey: "", sortDesc: false, search: "", kind: "", status: "", type: "", depth: "", time: "", issue: "", tlen: "", dlen: "", statsExternal: false },
     load("linkscout.ui")
   );
   delete ui.drill; // left over from earlier versions
@@ -136,7 +136,8 @@
    * and the navigation in sync and render the tab.
    */
   function setTab(tab) {
-    if (!["results", "stats", "seo", "mirror"].includes(tab)) tab = "stats";
+    if (tab === "seo") tab = "stats"; // the former SEO tab lives on in the overview
+    if (!["results", "stats", "mirror"].includes(tab)) tab = "stats";
     ui.tab = tab;
     const navTab = tab === "mirror" ? "mirror" : "results"; // overview, results and SEO belong to "Check website"
     for (const b of $$(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === navTab));
@@ -336,7 +337,6 @@
     renderProgress();
     if (ui.tab === "results") renderResults();
     if (ui.tab === "stats") renderStats();
-    if (ui.tab === "seo") renderSeo();
     if (ui.tab === "mirror") renderMirror();
   }
 
@@ -427,7 +427,9 @@
       if (ui.type && (typeOf(r) || UNKNOWN_TYPE) !== ui.type) return false;
       if (ui.status && !statusMatches(r, ui.status)) return false;
       if (ui.depth && !depthMatches(r, ui.depth)) return false;
-      if (ui.issue && !(ui.issue === "*" ? r.issues?.length : r.issues?.includes(ui.issue))) return false;
+      if (ui.issue && !issueMatches(r, ui.issue)) return false;
+      if (ui.tlen && lengthBucket(r.seo, "titles", TITLE_BUCKETS) !== +ui.tlen) return false;
+      if (ui.dlen && lengthBucket(r.seo, "descriptions", DESC_BUCKETS) !== +ui.dlen) return false;
       if (ui.time && !timeMatches(r, ui.time)) return false;
       if (q && !`${r.url} ${r.finalUrl || ""} ${r.title || ""}`.toLowerCase().includes(q)) return false;
       return true;
@@ -485,8 +487,15 @@
     fillSelect($("#f-depth"), t("filter.all"),
       depths.map((d) => [d >= MAX_DEPTH ? `${MAX_DEPTH}+` : String(d), clickLabel(d)]), ui.depth);
     const issues = state.issues || [];
-    fillSelect($("#f-issue"), t("filter.all"),
-      [...(issues.length ? [["*", t("filter.any_issue")]] : []), ...issues.map((i) => [i.id, t(`issue.${i.id}`)])], ui.issue);
+    const analysed = all.some((r) => r.seo);
+    fillSelect($("#f-issue"), t("filter.all"), [
+      ...(issues.length ? [["*", t("filter.any_issue")]] : []),
+      ...(analysed ? ["error", "warning", "notice", "none"].map((s) => [`sev:${s}`, t(`filter.sev_${s}`)]) : []),
+      ...issues.map((i) => [i.id, t(`issue.${i.id}`)]),
+    ], ui.issue);
+    const lenOptions = (bounds) => (analysed ? bounds.map((_, i) => [String(i), lengthLabel(bounds, i)]) : []);
+    fillSelect($("#f-tlen"), t("filter.all"), lenOptions(TITLE_BUCKETS), ui.tlen);
+    fillSelect($("#f-dlen"), t("filter.all"), lenOptions(DESC_BUCKETS), ui.dlen);
     $("#f-search").value = ui.search;
 
     // a filter that is set is highlighted, so a restricted list is obvious
@@ -548,11 +557,11 @@
     renderResults();
   });
   $("#f-search").addEventListener("input", (e) => { ui.search = e.target.value; save("linkscout.ui", ui); renderResults(); });
-  for (const [id, key] of [["#f-kind", "kind"], ["#f-status", "status"], ["#f-type", "type"], ["#f-depth", "depth"], ["#f-time", "time"], ["#f-issue", "issue"]]) {
+  for (const [id, key] of [["#f-kind", "kind"], ["#f-status", "status"], ["#f-type", "type"], ["#f-depth", "depth"], ["#f-time", "time"], ["#f-issue", "issue"], ["#f-tlen", "tlen"], ["#f-dlen", "dlen"]]) {
     $(id).addEventListener("change", (e) => { ui[key] = e.target.value; save("linkscout.ui", ui); renderResults(); });
   }
   $("#f-reset").addEventListener("click", () => {
-    Object.assign(ui, { search: "", kind: "", status: "", type: "", depth: "", time: "", issue: "" });
+    Object.assign(ui, { search: "", kind: "", status: "", type: "", depth: "", time: "", issue: "", tlen: "", dlen: "" });
     save("linkscout.ui", ui);
     renderResults();
   });
@@ -568,6 +577,44 @@
   $("#detail").addEventListener("click", (e) => { if (e.target.id === "detail") $("#detail").close(); });
 
   /** Show all details of one result in the dialog. */
+  /**
+   * SEO issue filter: an issue id, "*" (any issue) or "sev:<worst>" – the
+   * most severe issue of an analysed page: error, warning, notice or none.
+   */
+  function issueMatches(r, v) {
+    if (v === "*") return !!r.issues?.length;
+    if (v.startsWith("sev:")) return !!r.seo && r.status === 200 && worstSeverity(r) === v.slice(4);
+    return !!r.issues?.includes(v);
+  }
+  /** Most severe issue of a result: "error", "warning", "notice" or "none". */
+  function worstSeverity(r) {
+    const sevs = (r.issues || []).map(issueSeverity);
+    return ["error", "warning", "notice"].find((s) => sevs.includes(s)) || "none";
+  }
+
+  /**
+   * Length buckets of titles and meta descriptions (upper bounds in
+   * characters; bucket 0 = missing). The recommended ranges match the SEO
+   * checks: titles 10–60, descriptions 50–160 characters.
+   */
+  const TITLE_BUCKETS = [0, 9, 25, 40, 60, 80, Infinity]; // missing, ≤ 9, 10–25, 26–40, 41–60, 61–80, > 80
+  const DESC_BUCKETS = [0, 49, 100, 160, 200, Infinity]; // missing, ≤ 49, 50–100, 101–160, 161–200, > 200
+  const TITLE_ZONE = { from: 2, to: 4 };
+  const DESC_ZONE = { from: 2, to: 3 };
+  /** Bucket of the first title / description of a page, -1 when not analysed. */
+  function lengthBucket(seo, field, bounds) {
+    if (!seo) return -1;
+    const n = [...(seo[field]?.[0] || "").trim()].length;
+    if (!n) return 0;
+    return bounds.findIndex((b, i) => i > 0 && n <= b);
+  }
+  function lengthLabel(bounds, i) {
+    if (i === 0) return t("seo.missing");
+    const lo = bounds[i - 1] + 1, hi = bounds[i];
+    if (i === 1) return `≤ ${hi}`;
+    return hi === Infinity ? `> ${bounds[i - 1]}` : `${lo}–${hi}`;
+  }
+
   /** Severity of an issue id ("error", "warning", "notice"). */
   function issueSeverity(id) {
     return (state.issues || []).find((i) => i.id === id)?.severity || "notice";
@@ -591,9 +638,18 @@
     const rows = [];
     const order = { error: 0, warning: 1, notice: 2 };
     if (r.issues?.length) {
+      // Every issue with its severity, the explanation and what exactly was
+      // found on this URL (see issueContext).
       const sortedIssues = [...r.issues].sort((a, b) => order[issueSeverity(a)] - order[issueSeverity(b)]);
-      rows.push([t("detail.seo"), `<ul class="issue-list">${sortedIssues.map((id) =>
-        `<li><span class="sev-dot ${issueSeverity(id)}"></span>${esc(t(`issue.${id}`))}</li>`).join("")}</ul>`]);
+      rows.push([t("detail.seo"), `<ul class="issue-list">${sortedIssues.map((id) => {
+        const sev = issueSeverity(id);
+        const ctx = issueContext(id, r, link);
+        return `<li class="issue">
+          <div class="issue-head"><span class="sev-dot ${sev}"></span><b>${esc(t(`issue.${id}`))}</b><span class="sev-label ${sev}">${esc(t(`sev.${sev}`))}</span></div>
+          <p class="issue-help">${esc(t(`issue.${id}.help`))}</p>
+          ${ctx ? `<div class="issue-ctx">${ctx}</div>` : ""}
+        </li>`;
+      }).join("")}</ul>`]);
     }
     if (!p) return rows;
     const list = (items) => `<ul>${items.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
@@ -606,13 +662,59 @@
     rows.push([t("detail.lang"), esc(p.lang || "–")]);
     if (p.hreflang?.length) rows.push([t("detail.hreflang"), `<ul>${p.hreflang.map((a) => `<li>${esc(a.lang)}: ${link(a.url)}</li>`).join("")}</ul>`]);
     if (p.jsonld) rows.push([t("detail.jsonld"), `${p.jsonld}${p.jsonldErrors?.length ? " – " + esc(p.jsonldErrors.join("; ")) : ""}`]);
-    if (p.imagesNoAlt?.length) rows.push([t("detail.images_no_alt"), list(p.imagesNoAlt.slice(0, 20))]);
-    if (p.mixed?.length) rows.push([t("detail.mixed"), list(p.mixed.slice(0, 20))]);
-    const broken = brokenFragments(p);
-    if (broken.length) rows.push([t("detail.fragments_missing"), list(broken.slice(0, 20))]);
-    if (r.depth === 0 && p.securityMissing?.length) rows.push([t("detail.security"), list(p.securityMissing)]);
     if (r.depth === 0 && isSet(p.certNotAfter)) rows.push([t("detail.cert"), esc(new Date(p.certNotAfter).toLocaleDateString(init.lang))]);
     return rows;
+  }
+
+  /**
+   * What exactly an issue found on this URL: lengths, the affected images,
+   * headers or anchors, the other URLs with the same title … (HTML, every
+   * value escaped). "" when the explanation says it all.
+   */
+  function issueContext(id, r, link) {
+    const p = r.seo || {};
+    const MAX = 10;
+    const chars = (s) => t("detail.ctx_chars", { n: fmtNum([...(s || "")].length) });
+    const quote = (s) => (init.lang === "de" ? `„${esc(s)}“` : `“${esc(s)}”`);
+    const list = (items, fmt = esc) => `<ul>${items.slice(0, MAX).map((x) => `<li>${fmt(x)}</li>`).join("")}${items.length > MAX ? `<li class="muted">${esc(t("detail.ctx_more", { n: fmtNum(items.length - MAX) }))}</li>` : ""}</ul>`;
+    const label = (key, html) => `<div><span class="muted">${esc(t(key))}:</span> ${html}</div>`;
+    // other analysed pages that share a value with this one
+    const sameAs = (value) => (state.results || []).filter((x) => x.url !== r.url && x.seo && value(x) && value(x) === value(r)).map((x) => x.url);
+    const others = (value) => {
+      const urls = sameAs(value);
+      return urls.length ? label("detail.ctx_also_on", list(urls, link)) : "";
+    };
+    const canonical = p.canonicals?.length ? p.canonicals.map(link).join("<br>") : "";
+    switch (id) {
+      case "title_long": case "title_short": return `${quote(p.titles?.[0])} – ${chars(p.titles?.[0])}`;
+      case "title_multiple": return list(p.titles || [], quote);
+      case "title_duplicate": return quote(p.titles?.[0]) + others((x) => x.seo.titles?.[0]);
+      case "desc_long": case "desc_short": return `${quote(p.descriptions?.[0])} – ${chars(p.descriptions?.[0])}`;
+      case "desc_multiple": return list(p.descriptions || [], quote);
+      case "desc_duplicate": return quote(p.descriptions?.[0]) + others((x) => x.seo.descriptions?.[0]);
+      case "h1_multiple": return list(p.h1 || [], quote);
+      case "h1_duplicate": return quote(p.h1?.[0]) + others((x) => x.seo.h1?.[0]);
+      case "duplicate_content": return others((x) => x.seo.contentHash);
+      case "heading_skip": return label("detail.ctx_outline", esc((p.headings || []).slice(0, 30).map((l) => `h${l}`).join(" → ")));
+      case "noindex": return label("detail.robots", esc((p.robots || []).join(" · ")));
+      case "canonical_broken": case "canonical_other": case "canonical_multiple": return label("detail.canonical", canonical);
+      case "img_no_alt": return list(p.imagesNoAlt || [], link);
+      case "mixed_content": return list(p.mixed || [], link);
+      case "fragment_missing": return list(brokenFragments(p), link);
+      case "jsonld_invalid": return list(p.jsonldErrors || []);
+      case "security_headers": return list(p.securityMissing || []);
+      case "cert_expiring": return label("detail.cert", esc(new Date(p.certNotAfter).toLocaleDateString(init.lang)));
+      case "redirect_chain": case "link_to_redirect":
+        return `<ol>${(r.redirects || []).concat(r.finalUrl || []).map((u) => `<li>${link(u)}</li>`).join("")}</ol>`
+          + (id === "link_to_redirect" && r.foundOn?.length ? label("detail.found_on", list(r.foundOn, link)) : "");
+      case "few_inlinks": return label("detail.found_on", list(r.foundOn || [], link));
+      case "deep_page": return esc(clickLabel(r.depth));
+      case "img_large": return esc(fmtBytes(r.size));
+      case "url_long": return chars(r.url);
+      case "hreflang_invalid": case "hreflang_broken": case "hreflang_no_return": case "hreflang_canonical_conflict":
+        return `<ul>${(p.hreflang || []).map((a) => `<li>${esc(a.lang)}: ${link(a.url)}</li>`).join("")}</ul>`;
+      default: return "";
+    }
   }
 
   /** The #fragment links of a page whose target element does not exist (same rule as crawler.fragmentFound). */
@@ -709,7 +811,7 @@
    * Column chart, optionally stacked. groups: [{label, values: [n per series], tip, tipLabel}],
    * series: [{name, color}]. The total is written on each column's cap.
    */
-  function columnChart(groups, series, width) {
+  function columnChart(groups, series, width, zone) {
     const H = 220, top = 20, bottom = 28, left = 40, right = 8;
     const plotW = Math.max(100, width - left - right), plotH = H - top - bottom;
     const totals = groups.map((g) => g.values.reduce((a, b) => a + b, 0));
@@ -718,6 +820,10 @@
     const barW = Math.min(24, band * 0.6);
     const y = (v) => top + plotH - (v / maxV) * plotH;
     let svg = "";
+    if (zone) { // recommended range [from, to] of group indices, drawn behind the columns
+      const x0 = left + band * zone.from, x1 = left + band * (zone.to + 1);
+      svg += `<rect class="zone" x="${x0}" y="${top}" width="${x1 - x0}" height="${plotH}"/>`;
+    }
     for (let v = 0; v <= maxV; v += step) { // hairline grid + ticks
       const yy = Math.round(y(v)) + 0.5;
       svg += `<line class="grid" x1="${left}" x2="${left + plotW}" y1="${yy}" y2="${yy}"/>`;
@@ -741,9 +847,10 @@
       svg += `<rect class="hit" x="${left + band * i}" y="${top}" width="${band}" height="${plotH}" ${tipAttrs(g.tip, g.tipLabel || g.label)} ${totals[i] ? drillAttr(g.drill) : ""} role="button"/>`;
     });
     svg += `<line class="axis" x1="${left}" x2="${left + plotW}" y1="${top + plotH + 0.5}" y2="${top + plotH + 0.5}"/>`;
-    const legend = series.length > 1
-      ? `<div class="legend">${series.map((se) => `<span><i style="background:${se.color}"></i>${esc(se.name)}</span>`).join("")}</div>`
-      : "";
+    // the zone is explained below the chart, a label inside would collide with the column values
+    const keys = series.length > 1 ? series.map((se) => `<span><i style="background:${se.color}"></i>${esc(se.name)}</span>`) : [];
+    if (zone) keys.push(`<span><i class="zone-key"></i>${esc(zone.label)}</span>`);
+    const legend = keys.length ? `<div class="legend">${keys.join("")}</div>` : "";
     return `<svg class="chart" width="${width}" height="${H}" viewBox="0 0 ${width} ${H}" role="img">${svg}</svg>${legend}`;
   }
 
@@ -851,6 +958,7 @@
 
     const statusItems = s.byStatusClass;
 
+    const seo = seoCharts(checked);
     el.innerHTML = `
       <div class="stats-filter">
         <label class="check"><input type="checkbox" id="stats-external" ${ui.statsExternal ? "checked" : ""}>
@@ -866,6 +974,7 @@
         ${kpi(fmtMs(s.avgMs), "stats.avg_time", "", { sort: "durationMs" })}
       </div>
       <div class="panel"><h3>${esc(t("stats.chart_status"))}</h3>${shareBar(statusItems, (k) => t(`status.${k}`), classColor, (k) => ({ status: k }))}</div>
+      ${seo.html}
       <div class="grid charts">
         <div class="panel"><h3>${esc(t("stats.chart_time"))}</h3><p class="sub">${esc(t("stats.chart_time_sub"))}</p><div class="chart-box" data-chart="time"></div></div>
         <div class="panel"><h3>${esc(t("stats.chart_depth"))}</h3><p class="sub">${esc(t("stats.chart_depth_sub"))}</p><div class="chart-box" data-chart="depth"></div></div>
@@ -878,13 +987,14 @@
 
     // Columns are drawn at the real width of their box (crisp text, no scaling).
     drawCharts = () => {
-      for (const box of $$(".chart-box", el)) {
+      for (const box of $$(".chart-box[data-chart]", el)) {
         const w = Math.floor(box.clientWidth);
         if (!w) continue;
         box.innerHTML = box.dataset.chart === "time"
           ? columnChart(timeGroups, [{ name: "", color: "var(--accent)" }], w)
           : columnChart(depthGroups, [{ name: "", color: "var(--accent)" }], w);
       }
+      seo.draw();
     };
     drawCharts();
   }
@@ -899,14 +1009,14 @@
   /** Open the results list with the criteria of a clicked statistic. */
   function drillDown(el) {
     const { sort, ...filters } = JSON.parse(el.dataset.drill);
-    Object.assign(ui, { search: "", kind: "", status: "", type: "", depth: "", time: "", issue: "" }, filters);
+    Object.assign(ui, { search: "", kind: "", status: "", type: "", depth: "", time: "", issue: "", tlen: "", dlen: "" }, filters);
     if (sort) { ui.sortKey = sort; ui.sortDesc = true; }
     tip.hidden = true;
     setTab("results");
     window.scrollTo({ top: $("#subtabs").offsetTop - 70 });
   }
   // Overview and SEO tab share the drill-down (and the tooltip, see below).
-  const drillAreas = [$("#stats-body"), $("#seo-body")];
+  const drillAreas = [$("#stats-body")];
   for (const area of drillAreas) {
     area.addEventListener("click", (e) => {
       if (e.target.closest(".info")) return; // the "i" only explains
@@ -960,43 +1070,51 @@
   // --- SEO ------------------------------------------------------------------
 
   /**
-   * Render the SEO tab: every failed check (crawler.Analyze, state.issues)
-   * grouped by severity. A click on a check opens the results list filtered
-   * to the affected URLs.
+   * The SEO charts of the overview: health of the analysed pages (worst
+   * issue per page) and the length distribution of titles and descriptions.
+   * Every part opens the results list with the matching filter.
    */
-  function renderSeo() {
-    const el = $("#seo-body");
-    const results = state.results || [];
-    if (!results.some((r) => !r.pending)) {
-      el.innerHTML = `<div class="panel empty">${esc(t("stats.empty"))}</div>`;
-      return;
-    }
-    const issues = state.issues || [];
-    const analysed = results.filter((r) => r.seo).length;
-    const urls = (n) => (n === 1 ? t("seo.one_url") : t("seo.urls", { n: fmtNum(n) }));
-    const head = `<div class="panel seo-head"><p>${esc(t("seo.intro"))}</p>
-      <p class="muted">${esc(t("seo.pages_checked", { n: fmtNum(analysed) }))}</p></div>`;
-    if (!issues.length) {
-      el.innerHTML = head + `<div class="panel empty">${esc(t("seo.none"))}</div>`;
-      return;
-    }
-    const groups = ["error", "warning", "notice"].map((sev) => {
-      const items = issues.filter((i) => i.severity === sev);
-      if (!items.length) return "";
-      const rows = items.map((i) => `
-        <div class="seo-row" role="button" tabindex="0" data-drill="${esc(JSON.stringify({ issue: i.id }))}">
-          <span class="sev-dot ${sev}"></span>
-          <span class="name">${esc(t(`issue.${i.id}`))}</span>
-          ${info(t(`issue.${i.id}.help`))}
-          <span class="count">${esc(urls(i.count))}</span>
-        </div>`).join("");
-      // distinct URLs with at least one issue of this severity
-      const ids = new Set(items.map((i) => i.id));
-      const total = results.filter((r) => r.issues?.some((id) => ids.has(id))).length;
-      return `<div class="panel seo-group ${sev}"><h3><span class="sev-badge ${sev}">${fmtNum(items.length)}</span>${esc(t(`sev.${sev}`))}
-        <span class="muted">· ${esc(urls(total))}</span></h3>${rows}</div>`;
-    }).join("");
-    el.innerHTML = head + groups;
+  function seoCharts(results) {
+    const pages = results.filter((r) => r.seo && r.status === 200);
+    if (!pages.length) return { html: "", draw() {} };
+    const order = ["error", "warning", "notice", "none"];
+    const counts = Object.fromEntries(order.map((s) => [s, 0]));
+    for (const r of pages) counts[worstSeverity(r)]++;
+    const sevColor = (s) => ({ error: "var(--bad)", warning: "var(--warn)", notice: "var(--info)", none: "var(--ok)" }[s]);
+    const health = shareBar(order.filter((s) => counts[s]).map((key) => ({ key, count: counts[key] })),
+      (s) => (s === "error" || s === "warning" ? t(`sev.${s}`) : t(`filter.sev_${s}`)), sevColor, (s) => ({ issue: `sev:${s}` }));
+    const pctOk = Math.round(((pages.length - counts.error) / pages.length) * 100);
+
+    const nURLs = (n) => (n === 1 ? t("seo.one_url") : t("seo.urls", { n: fmtNum(n) }));
+    const hist = (field, bounds, zone, key) => {
+      const n = bounds.map(() => 0);
+      for (const r of pages) n[lengthBucket(r.seo, field, bounds)]++;
+      return {
+        groups: n.map((v, i) => ({ label: lengthLabel(bounds, i), values: [v], tip: nURLs(v), drill: { [key]: String(i) } })),
+        zone: { ...zone, label: t("seo.recommended") },
+      };
+    };
+    const title = hist("titles", TITLE_BUCKETS, TITLE_ZONE, "tlen");
+    const desc = hist("descriptions", DESC_BUCKETS, DESC_ZONE, "dlen");
+    const html = `
+      <div class="panel seo-health">
+        <h3>${esc(t("seo.health"))}</h3>
+        <p class="sub">${esc(t("seo.health_sub"))}</p>
+        <div class="seo-hero"><b>${pctOk} %</b><span>${esc(t("seo.hero"))}</span></div>
+        ${health}
+      </div>
+      <div class="grid charts">
+        <div class="panel"><h3>${esc(t("seo.title_len"))}</h3><p class="sub">${esc(t("seo.title_len_sub"))}</p><div class="chart-box" data-seo-chart="title"></div></div>
+        <div class="panel"><h3>${esc(t("seo.desc_len"))}</h3><p class="sub">${esc(t("seo.desc_len_sub"))}</p><div class="chart-box" data-seo-chart="desc"></div></div>
+      </div>`;
+    const draw = () => {
+      for (const box of $$("#stats-body [data-seo-chart]")) {
+        const w = Math.floor(box.clientWidth);
+        const c = box.dataset.seoChart === "title" ? title : desc;
+        if (w) box.innerHTML = columnChart(c.groups, [{ name: "", color: "var(--accent)" }], w, c.zone);
+      }
+    };
+    return { html, draw };
   }
 
   // --- compare --------------------------------------------------------------

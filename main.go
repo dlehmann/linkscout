@@ -449,7 +449,7 @@ func readReport(path string) (crawler.Report, error) {
 }
 
 // writeReport writes rep to path, or to stdout for "-". The format follows
-// the file extension: .csv (table), .html (readable report), otherwise JSON
+// the file extension: .csv (table), .html / .pdf (readable report), otherwise JSON
 // (the format -recheck and the web UI can read again).
 func writeReport(path string, rep crawler.Report, lang i18n.Lang) error {
 	var buf bytes.Buffer
@@ -460,6 +460,10 @@ func writeReport(path string, rep crawler.Report, lang i18n.Lang) error {
 		}
 	case ".html", ".htm":
 		if err := server.WriteHTMLReport(&buf, rep, lang); err != nil {
+			return err
+		}
+	case ".pdf":
+		if err := server.WritePDFReport(&buf, rep, lang); err != nil {
 			return err
 		}
 	default:

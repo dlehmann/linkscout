@@ -38,18 +38,20 @@ the checked site.
 
 - **One input:** just the start URL. Everything on the same host (with or
   without `www.`, http or https) counts as internal; sub-domains are external
-- **Overview:** key figures and charts – status of all URLs, response times,
-  clicks from the start page, status codes, MIME types and size by MIME type.
+- **Overview:** key figures and charts – status of all URLs, SEO health of
+  the pages, length of titles and meta descriptions, response times, clicks
+  from the start page, status codes, MIME types and size by MIME type.
   External links can be included or left out (default: left out). Clicking a
   figure, bar or column opens the results list filtered to exactly those URLs
-- **SEO tab** with 48 checks, grouped into errors, warnings and notices –
-  indexability (`noindex`, canonicals, robots.txt), titles, meta descriptions
-  and headings (missing, duplicate, length), redirect chains and loops, links
-  to redirects, broken `#anchors`, mixed content, images (alt text, size),
+- **48 SEO checks**, rated as errors, warnings and notices – indexability
+  (`noindex`, canonicals, robots.txt), titles, meta descriptions and headings
+  (missing, duplicate, length), redirect chains and loops, links to
+  redirects, broken `#anchors`, mixed content, images (alt text, size),
   sitemap (orphan pages, errors, `noindex`), click depth, hreflang, JSON-LD,
   viewport, `lang`, social media previews, duplicate content, security
-  headers, certificate expiry and URL hygiene. A click shows the affected
-  URLs; the details of a result list its SEO data
+  headers, certificate expiry and URL hygiene. The results list shows and
+  filters them per URL; the details of a URL explain every issue with what
+  exactly was found (lengths, affected images, pages with the same title …)
 - **sitemap.xml and robots.txt:** after the link crawl the URLs of the
   sitemap are checked too, pages only listed there appear as *not linked*.
   URLs blocked by robots.txt are marked but still checked
@@ -67,7 +69,7 @@ the checked site.
   password under *Advanced settings*, or `-user`/`-password` on the command
   line. The credentials are only sent to the checked site, never to external
   links or CDNs, and the password never appears in exports
-- **Export** as JSON, CSV or a self-contained HTML report; JSON import;
+- **Export** as JSON, CSV, a self-contained HTML report or PDF; JSON import;
   **check again** only the URLs without status 200, or everything;
   **compare** with an earlier report
 - **Save offline:** downloads pages, images, CSS, JavaScript, fonts, videos
@@ -83,9 +85,9 @@ the checked site.
   languages can be added with a single file (see [AGENTS.md](AGENTS.md)).
   Light and dark theme follow the system and can be toggled
 
-| SEO | Results |
+| SEO in the overview | Results |
 |---|---|
-| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/seo-dark.webp"><img src="docs/screenshots/seo-light.webp" alt="SEO checks grouped by severity"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/results-dark.webp"><img src="docs/screenshots/results-light.webp" alt="Results list with filters"></picture> |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/seo-dark.webp"><img src="docs/screenshots/seo-light.webp" alt="SEO health and length of titles and descriptions"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/results-dark.webp"><img src="docs/screenshots/results-light.webp" alt="Results list with filters"></picture> |
 
 | Save offline |
 |---|
@@ -171,7 +173,7 @@ Headless (no UI), for scripts and CI:
 # check and write a JSON report; exit code 3 if anything is broken
 linkscout -report report.json -fail-on-broken https://example.com
 
-# the same as CSV table or readable HTML report (format = file extension)
+# the same as CSV table, readable HTML or PDF report (format = file extension)
 linkscout -report report.html https://example.com
 
 # later: re-check only the URLs that were not 200 and update the report

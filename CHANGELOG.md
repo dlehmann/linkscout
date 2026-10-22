@@ -5,7 +5,19 @@ All notable changes to LinkScout. The format follows
 [Semantic Versioning](https://semver.org/). The release workflow uses the
 section of a version as release notes.
 
-## [Unreleased]
+## [1.2.0] - 2026-10-22
+
+### Added
+
+- **PDF export** of the report (A4 landscape: key figures, SEO issues, all
+  URLs), in the export menu and with `-report report.pdf`
+- **SEO charts in the overview**: SEO health of the pages (most severe issue
+  per page) and the length of titles and meta descriptions with the
+  recommended range; every part opens the filtered results list. New filters
+  for the worst issue, title length and description length
+- The **details of a URL** explain every SEO issue: severity, what the check
+  means and what exactly was found (lengths, the pages with the same title,
+  the images without alt text, the missing headers, the redirect chain …)
 
 ### Changed
 
@@ -16,6 +28,9 @@ section of a version as release notes.
   right-aligned). Sorting moved to a "Sort by" selection
 - Filters have labels, their first option is simply "All"; a filter that is
   set is highlighted
+- The SEO tab is gone: its charts moved to the overview, the issues are
+  shown per URL in the results list (column, filter, details)
+- Sub-tab order: overview first, results list last
 
 ## [1.1.0] - 2026-10-21
 
@@ -73,6 +88,6 @@ First public release.
 - English and German UI by system language
 - Static binaries for Linux (x86_64, arm64) and macOS (Apple Silicon)
 
-[Unreleased]: https://github.com/dlehmann/linkscout/compare/v1.1.0...HEAD
+[1.2.0]: https://github.com/dlehmann/linkscout/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/dlehmann/linkscout/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/dlehmann/linkscout/releases/tag/v1.0.0

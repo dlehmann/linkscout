@@ -106,7 +106,7 @@
     <div class="shot">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="screenshots/overview-dark.webp">
-        <img src="screenshots/overview-light.webp" width="1280" height="1460" alt="LinkScout overview: key figures, status of all URLs, response times and clicks from the start page">
+        <img src="screenshots/overview-light.webp" width="1280" height="2017" alt="LinkScout overview: key figures, status of all URLs, response times and clicks from the start page">
       </picture>
     </div>
   </div>
@@ -122,7 +122,7 @@
         <div class="card"><h3>Sortable, filterable list</h3><p>URL, status, MIME type, title, kind, clicks, size, time and SEO issues – filter by every value, open details with redirect chain, SEO data and the pages that link to a URL.</p></div>
         <div class="card"><h3>Sitemap and robots.txt</h3><p>The URLs of your sitemap are checked too – pages that are listed there but linked nowhere show up as orphans. URLs blocked by robots.txt are marked.</p></div>
         <div class="card"><h3>Compare runs</h3><p>Compare the results with an earlier report: new and removed URLs, changed status codes, new and fixed SEO issues.</p></div>
-        <div class="card"><h3>Export and re-check</h3><p>Export as JSON, CSV or a self-contained HTML report, import a report later and re-check only the URLs that failed – or everything.</p></div>
+        <div class="card"><h3>Export and re-check</h3><p>Export as JSON, CSV, a self-contained HTML report or PDF, import a report later and re-check only the URLs that failed – or everything.</p></div>
         <div class="card"><h3>Password protected sites</h3><p>HTTP Basic authentication is supported. Credentials are only sent to the checked site and never stored in reports.</p></div>
       </div>
     </div>
@@ -143,7 +143,7 @@
     <div class="wrap split">
       <div>
         <h2>48 SEO checks</h2>
-        <p>Every internal page is analysed while it is checked – no extra requests, no account, nothing leaves your machine. The SEO tab groups the findings into errors, warnings and notices; a click shows the affected URLs.</p>
+        <p>Every internal page is analysed while it is checked – no extra requests, no account, nothing leaves your machine. The overview shows the SEO health of all pages and the length of titles and descriptions; the results list shows and filters the issues per URL, and the details explain each one with what exactly was found.</p>
         <ul>
           <li><b>Indexability:</b> <code>noindex</code>, missing or broken canonicals, robots.txt, sitemap entries with errors or <code>noindex</code>, orphan pages.</li>
           <li><b>Content:</b> missing, duplicate, too long or too short titles and meta descriptions, H1 and heading structure, duplicate content.</li>
@@ -155,7 +155,7 @@
       <div class="shot">
         <picture>
           <source media="(prefers-color-scheme: dark)" srcset="screenshots/seo-dark.webp">
-          <img src="screenshots/seo-light.webp" width="1280" height="1202" alt="SEO tab with the checks grouped into errors, warnings and notices" loading="lazy">
+          <img src="screenshots/seo-light.webp" width="1280" height="900" alt="SEO health of the pages and length of titles and meta descriptions" loading="lazy">
         </picture>
       </div>
     </div>
@@ -209,7 +209,7 @@ make install PREFIX=$HOME/.local   # binary, desktop launcher and icon</code></p
 
       <h3 class="step">Without the browser</h3>
       <pre><code>linkscout -report report.json https://example.com      # check, write a JSON report
-linkscout -report report.html https://example.com      # … or a readable HTML report (also .csv)
+linkscout -report report.html https://example.com      # … or a readable report (.html, .pdf, .csv)
 linkscout -recheck report.json                          # re-check the failed URLs
 linkscout -report new.json -compare report.json https://example.com  # what changed?
 linkscout -mirror ./example-offline https://example.com # offline copy</code></pre>
