@@ -67,6 +67,13 @@ type options struct {
 	compare      string
 	mirrorDir    string
 	mirrorExt    bool
+	mirrorFiles  bool
+	mirrorRules  string
+	mirrorFresh  bool
+	mirrorRobots bool
+	rate         float64
+	bandwidth    int
+	maxFileSize  int
 	lang         string
 	showVersion  bool
 }
@@ -123,7 +130,7 @@ func run(args []string) int {
 		o.password = os.Getenv("LINKSCOUT_PASSWORD")
 	}
 	fopts := fetch.Options{Referer: o.referer, UserAgent: o.userAgent, Timeout: o.timeout,
-		Username: o.user, Password: o.password}
+		Username: o.user, Password: o.password, RatePerHost: max(o.rate, 0)}
 	fopts.AcceptLanguage = i18n.AcceptLanguage(lang)
 	cfg := crawler.Config{
 		StartURL:      target,
@@ -145,9 +152,21 @@ func run(args []string) int {
 			fmt.Fprintln(os.Stderr, T("cli.need_url"))
 			return 2
 		}
+		if _, err := mirror.ParseRules([]string{o.mirrorRules}); err != nil {
+			var re *mirror.RuleError
+			if errors.As(err, &re) {
+				fmt.Fprintf(os.Stderr, T("error.invalid_rule")+"\n", re.Rule)
+			}
+			return 2
+		}
+		mfetch := fopts
+		mfetch.Bandwidth = int64(max(o.bandwidth, 0)) << 10
 		return runMirror(ctx, lang, mirror.Config{
-			StartURL: target, OutDir: o.mirrorDir, Fetch: fopts, External: o.mirrorExt,
+			StartURL: target, OutDir: o.mirrorDir, Fetch: mfetch, External: o.mirrorExt,
 			Concurrency: min(o.concurrency, 8), MaxPages: o.maxPages, Delay: o.delay,
+			ExternalFiles: o.mirrorFiles, Rules: strings.Fields(o.mirrorRules),
+			Robots: o.mirrorRobots, Sitemap: !o.noSitemap, Fresh: o.mirrorFresh,
+			MaxFileSize: int64(max(o.maxFileSize, 0)) << 20,
 		})
 	case o.report != "" || o.recheck != "":
 		return runHeadless(ctx, lang, o, cfg)
@@ -202,6 +221,13 @@ func parseFlags(args []string, lang i18n.Lang) (*options, *flag.FlagSet) {
 	fs.StringVar(&o.compare, "compare", "", T("flag.compare"))
 	fs.StringVar(&o.mirrorDir, "mirror", "", T("flag.mirror"))
 	fs.BoolVar(&o.mirrorExt, "mirror-external", false, T("flag.mirror_external"))
+	fs.BoolVar(&o.mirrorFiles, "mirror-external-files", false, T("flag.mirror_external_files"))
+	fs.StringVar(&o.mirrorRules, "mirror-rules", "", T("flag.mirror_rules"))
+	fs.BoolVar(&o.mirrorRobots, "mirror-robots", false, T("flag.mirror_robots"))
+	fs.BoolVar(&o.mirrorFresh, "mirror-fresh", false, T("flag.mirror_fresh"))
+	fs.Float64Var(&o.rate, "rate", 0, T("flag.rate"))
+	fs.IntVar(&o.bandwidth, "bandwidth", 0, T("flag.bandwidth"))
+	fs.IntVar(&o.maxFileSize, "max-file-size", 0, T("flag.max_file_size"))
 	fs.StringVar(&o.lang, "lang", "", fmt.Sprintf(T("flag.lang"), i18n.Codes()))
 	fs.BoolVar(&o.showVersion, "version", false, T("flag.version"))
 	fs.Usage = func() { printUsage(fs, lang) }
@@ -250,6 +276,7 @@ func runUI(ctx context.Context, lang i18n.Lang, o *options, cfg crawler.Config) 
 			Username: o.user, Password: o.password,
 			Concurrency: o.concurrency, MaxPages: o.maxPages, DelayMs: int(o.delay.Milliseconds()),
 			CheckExternal: !o.noExternal, MirrorBase: server.DefaultMirrorBase(),
+			RatePerHost: max(o.rate, 0), BandwidthKiB: max(o.bandwidth, 0), MaxFileSizeMiB: max(o.maxFileSize, 0),
 		},
 		AllowAnyHost: !isLoopbackListen(o.listen),
 	}, c)
@@ -502,6 +529,9 @@ func runMirror(ctx context.Context, lang i18n.Lang, cfg mirror.Config) int {
 		return 1
 	}
 	fmt.Fprintf(os.Stderr, i18n.T(lang, "cli.mirror_done")+"\n", p.OutDir, p.Files)
+	if p.Unchanged > 0 || p.Removed > 0 {
+		fmt.Fprintf(os.Stderr, i18n.T(lang, "cli.mirror_update")+"\n", p.Unchanged, p.Removed)
+	}
 	if len(p.Problems) > 0 {
 		fmt.Fprintf(os.Stderr, i18n.T(lang, "cli.mirror_problems")+"\n", len(p.Problems))
 		for _, pr := range p.Problems {
@@ -509,10 +539,15 @@ func runMirror(ctx context.Context, lang i18n.Lang, cfg mirror.Config) int {
 			switch {
 			case pr.TooLarge:
 				what = i18n.T(lang, "cli.mirror_too_large")
+			case pr.Robots:
+				what = i18n.T(lang, "cli.mirror_robots")
 			case what == "":
 				what = fmt.Sprintf("HTTP %d", pr.Status)
 			}
-			if pr.Saved {
+			switch {
+			case pr.Kept:
+				what += " – " + i18n.T(lang, "cli.mirror_kept")
+			case pr.Saved:
 				what += " – " + i18n.T(lang, "cli.mirror_saved")
 			}
 			fmt.Fprintf(os.Stderr, "  %s  %s\n", pr.URL, what)

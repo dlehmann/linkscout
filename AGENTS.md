@@ -37,7 +37,10 @@ internal/i18n               locale detection; one translation table per language
 internal/fetch              HTTP client: Firefox headers, referer policy, redirects, timeouts
 internal/links              pure helpers: normalise, extract links/titles, classify types
 internal/crawler            crawl + check, re-check failed, stats, JSON report format
-internal/mirror             offline copy (download, path mapping, link rewriting, ZIP)
+internal/mirror             offline copy (download, path mapping, link rewriting, ZIP),
+                            rules.go (+/- patterns), scripts.go (URLs in JS),
+                            state.go (manifest, update, continue)
+internal/robots             robots.txt and sitemap.xml (used by crawler and mirror)
 internal/server             HTTP API + embedded UI (web/index.html, app.js, style.css),
                             download list of offline copies (mirrorjobs.go)
 internal/desktop            open URLs / folders (xdg-open, gio; open on macOS)
@@ -234,6 +237,49 @@ have to wait for SSH.
   same host go to `_site/<path>`. Links are resolved against the URL a file
   was actually served from (`entry.final`, after redirects such as
   `/edith` → `/edith/`).
+- **Mirror updates** (`mirror/state.go`, taken from HTTrack): a finished run
+  writes `<out>/.linkscout/manifest.json` (URL, local path, type, status,
+  ETag, Last-Modified per file) and keeps the *originals* of rewritten
+  HTML/CSS in `.linkscout/originals/<sha1(url)>` (needed to parse unchanged
+  pages). The next run sends If-None-Match / If-Modified-Since
+  (`fetch.DownloadIf`); on 304 – and on temporary failures (transport
+  error, 5xx, 429, 408: `Problem.Kept`) – the previous file is hard-linked
+  (`linkOrCopy`) into the tmp dir and goes through phase 2 like a fresh
+  download (renaming a hard link onto the file it links to does nothing;
+  `rewriteFile` removes `dst` first so it never truncates a shared inode).
+  Files of the old manifest whose path is not used any more are deleted
+  (`Progress.Removed`) – only files listed there, never other files. A
+  stopped run (or a failed phase 2) keeps `.linkscout-tmp` and writes
+  `.linkscout/partial.json`; the next run reuses those files *without* a
+  request (`prevFile.partial`). `Config.Fresh` ignores all of it. Both
+  directories are left out of the ZIP, and a site path starting with them
+  gets a `_` prefix. The UI calls the start button of a finished entry
+  "Aktualisieren"/"Update", of a stopped one "Fortsetzen"/"Continue".
+- **What the mirror downloads** (`run.add`): the start URL always; then
+  `Rules` (`mirror/rules.go`: `+`/`-` glob patterns, `*` = anything, a
+  pattern starting with `/` applies to path+query, otherwise host+path+query
+  without scheme; whole-string match, also against the percent-decoded form;
+  last matching rule wins) – an including rule can even take an external
+  page (saved, not crawled). Without a matching rule: everything of the
+  site, external embedded resources with `External`, external *linked*
+  files (known file extension) with `ExternalFiles`, never external pages.
+  `Robots` (off by default in UI and CLI, like the check ignores it; CLI
+  `-mirror-robots`) skips URLs of the
+  site that robots.txt ("*" group) disallows; they are listed as
+  `Problem.Robots`. `Sitemap` adds the sitemap pages after the link crawl
+  (like the crawler; CLI `-no-sitemap`). Scripts are searched for quoted
+  URLs/paths with a known extension (`mirror/scripts.go`; relative paths
+  only in inline scripts, script files only when internal and ≤5 MiB);
+  they are downloaded but scripts are never rewritten, and their errors are
+  not reported (`entry.guessed`). A stopped run does not report the URLs
+  that were cancelled.
+- **Limits** live in `fetch.Options`: `RatePerHost` (requests per second per
+  host, `www.`/port ignored; `Download` waits *before* its idle timer
+  starts) and `Bandwidth` (bytes per second shared by all downloads of a
+  client, read in chunks of ≤¼ s so waits stay below the idle timeout).
+  CLI `-rate` applies to checks and copies (UI checks use it too, via
+  `Defaults.RatePerHost`), `-bandwidth`/`-max-file-size` to copies; the
+  mirror form has fields for all three.
 - **Offline copy list** (`server/mirrorjobs.go`): the UI manages a list of
   mirror jobs; every job snapshots URL, target directory, user agent,
   credentials and limits when it is added, and all jobs can run at the same
@@ -358,10 +404,10 @@ port. The user's own install is `make install PREFIX=$HOME/.local` (no sudo).
 - Duplicate checks (title, description, H1, content) only compare indexable
   pages (no `noindex`, canonical = self). Security headers and certificate
   are reported on the start page only (they are site-wide).
-- robots.txt (`crawler/robots.go`) is loaded before the crawl and only marks
+- robots.txt (`internal/robots`) is loaded before the crawl and only marks
   URLs (`RobotsBlocked`); the crawl ignores it on purpose. With
   `Config.Sitemap` the sitemap URLs (robots.txt `Sitemap:` or `/sitemap.xml`,
-  indexes and .gz followed, limits in robots.go) are added *after* the link
+  indexes and .gz followed, limits in robots/robots.go) are added *after* the link
   crawl; URLs not reached by links get `Depth = NotLinked (-1)` = orphans,
   and so do the pages only linked from orphans.
 - `POST /api/compare` / `-compare` (`crawler.Compare`) and the CSV / HTML /
@@ -428,7 +474,10 @@ host name → external). Server tests drive the real HTTP API.
 
 ## Ideas / not done yet
 
-- per-host rate limiting (only a global delay exists)
+- rate/bandwidth fields in the check form of the UI (only `-rate` on the
+  CLI applies to checks today)
+- byte-range resume of a single interrupted large file (continuing works
+  per file)
 - persistent history of runs (comparing needs an exported report today)
 - AUR package (`PKGBUILD`) and apt/pacman repositories (the release only
   has the package files)

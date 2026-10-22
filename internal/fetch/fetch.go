@@ -14,6 +14,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -45,6 +46,13 @@ type Options struct {
 	Username string `json:"username,omitempty"`
 	Password string `json:"-"`
 	AuthHost string `json:"-"`
+
+	// RatePerHost limits the requests per second to each host (a leading
+	// "www." and the port are ignored); 0 means unlimited.
+	RatePerHost float64 `json:"ratePerHost,omitempty"`
+	// Bandwidth limits the body bytes per second all downloads of the client
+	// (Client.Download) read together; 0 means unlimited.
+	Bandwidth int64 `json:"bandwidth,omitempty"`
 }
 
 // HasAuth reports whether credentials are configured.
@@ -66,9 +74,11 @@ func bareHost(h string) string {
 
 // Client performs browser-like requests. It is safe for concurrent use.
 type Client struct {
-	opts Options
-	hc   *http.Client // checks: Timeout covers the whole request
-	dl   *http.Client // downloads: no overall timeout, see Download
+	opts  Options
+	hc    *http.Client // checks: Timeout covers the whole request
+	dl    *http.Client // downloads: no overall timeout, see Download
+	hosts *hostLimiter // nil without RatePerHost
+	bw    *throttle    // nil without Bandwidth
 }
 
 // Response is the outcome of a single (possibly redirected) request.
@@ -89,6 +99,8 @@ type Response struct {
 	// LastModified is the Last-Modified header of the final response (zero
 	// when missing or invalid).
 	LastModified time.Time
+	// ETag is the entity tag of the final response (with quotes, as sent).
+	ETag string
 }
 
 // keptHeaders are copied into Response.Header. Everything else is dropped to
@@ -115,6 +127,12 @@ func New(opts Options) *Client {
 	}
 	jar, _ := cookiejar.New(nil) // a browser keeps cookies, so do we
 	c := &Client{opts: opts}
+	if opts.RatePerHost > 0 {
+		c.hosts = &hostLimiter{interval: time.Duration(float64(time.Second) / opts.RatePerHost), next: map[string]time.Time{}}
+	}
+	if opts.Bandwidth > 0 {
+		c.bw = &throttle{rate: opts.Bandwidth}
+	}
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.MaxIdleConnsPerHost = 16
 	tr.ResponseHeaderTimeout = opts.Timeout // also bounds downloads until the first byte
@@ -215,12 +233,19 @@ func isHTML(ct string) bool {
 // no limit for the whole transfer – a large video may take minutes – but the
 // request is aborted when no data arrives for Options.Timeout.
 func (c *Client) Download(parent context.Context, target, source string, w io.Writer, maxBytes int64) Response {
+	// Wait for the host's turn before the idle timer starts.
+	if err := c.waitHost(parent, target); err != nil {
+		return Response{Size: -1, FinalURL: target, Err: err}
+	}
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	idle := time.AfterFunc(c.opts.Timeout, cancel) // until the response headers arrive
 	defer idle.Stop()
 	r := c.doWith(c.dl, ctx, http.MethodGet, target, source, func(resp *http.Response) (int64, error) {
 		var body io.Reader = &idleReader{r: resp.Body, timer: idle, d: c.opts.Timeout}
+		if c.bw != nil {
+			body = &throttledReader{r: body, t: c.bw, ctx: ctx}
+		}
 		if maxBytes > 0 {
 			body = io.LimitReader(body, maxBytes)
 		}
@@ -230,6 +255,26 @@ func (c *Client) Download(parent context.Context, target, source string, w io.Wr
 		r.Err = errStalled // the idle timer fired, the caller did not cancel
 	}
 	return r
+}
+
+// Validators make a download conditional: the server answers 304 Not
+// Modified (and sends no body) when the resource did not change.
+type Validators struct {
+	ETag         string
+	LastModified time.Time
+}
+
+// validatorsKey stores the Validators of a request in its context.
+type validatorsKey struct{}
+
+// DownloadIf is Download with If-None-Match / If-Modified-Since headers from
+// v. A response with status 304 means the copy the validators belong to is
+// still current; nothing is written to w then.
+func (c *Client) DownloadIf(ctx context.Context, target, source string, w io.Writer, maxBytes int64, v Validators) Response {
+	if v.ETag != "" || !v.LastModified.IsZero() {
+		ctx = context.WithValue(ctx, validatorsKey{}, v)
+	}
+	return c.Download(ctx, target, source, w, maxBytes)
 }
 
 // errStalled is reported when a download receives no data for Options.Timeout.
@@ -284,6 +329,22 @@ func (c *Client) doWith(hc *http.Client, ctx context.Context, method, target, so
 		return res
 	}
 	c.setHeaders(req, source)
+	if v, ok := ctx.Value(validatorsKey{}).(Validators); ok {
+		if v.ETag != "" {
+			req.Header.Set("If-None-Match", v.ETag)
+		}
+		if !v.LastModified.IsZero() {
+			req.Header.Set("If-Modified-Since", v.LastModified.UTC().Format(http.TimeFormat))
+		}
+	}
+	if hc != c.dl { // Download waited already
+		if err := c.waitHost(ctx, target); err != nil {
+			res.Err = err
+			res.FinalURL = target
+			return res
+		}
+		start = time.Now() // the wait is not part of the response time
+	}
 
 	resp, err := hc.Do(req)
 	res.Duration = time.Since(start)
@@ -302,6 +363,7 @@ func (c *Client) doWith(hc *http.Client, ctx context.Context, method, target, so
 	if t, err := http.ParseTime(resp.Header.Get("Last-Modified")); err == nil {
 		res.LastModified = t.UTC()
 	}
+	res.ETag = resp.Header.Get("ETag")
 	for _, k := range keptHeaders {
 		if v := resp.Header.Values(k); len(v) > 0 {
 			if res.Header == nil {
@@ -428,4 +490,97 @@ func unwrapURLError(err error) error {
 		return ue.Err
 	}
 	return err
+}
+
+// waitHost blocks until a request to the host of target may start
+// (Options.RatePerHost).
+func (c *Client) waitHost(ctx context.Context, target string) error {
+	if c.hosts == nil {
+		return nil
+	}
+	u, err := url.Parse(target)
+	if err != nil {
+		return nil // the request itself reports the error
+	}
+	return c.hosts.wait(ctx, u.Host)
+}
+
+// hostLimiter spaces the requests to each host at least interval apart.
+type hostLimiter struct {
+	interval time.Duration
+	mu       sync.Mutex
+	next     map[string]time.Time // earliest start of the next request per host
+}
+
+// wait blocks until a request to host may start (or ctx ends).
+func (l *hostLimiter) wait(ctx context.Context, host string) error {
+	h := bareHost(host)
+	l.mu.Lock()
+	now := time.Now()
+	at := l.next[h]
+	if at.Before(now) {
+		at = now
+	}
+	l.next[h] = at.Add(l.interval)
+	l.mu.Unlock()
+	return sleep(ctx, time.Until(at))
+}
+
+// throttle is a bandwidth limit shared by all downloads of a client: every
+// chunk that is read books its transfer time at rate bytes per second.
+type throttle struct {
+	rate int64
+	mu   sync.Mutex
+	next time.Time // when the bytes booked so far have been "paid"
+}
+
+// take books n bytes and blocks until they fit into the limit.
+func (t *throttle) take(ctx context.Context, n int) error {
+	t.mu.Lock()
+	now := time.Now()
+	if t.next.Before(now) {
+		t.next = now
+	}
+	t.next = t.next.Add(time.Duration(float64(n) / float64(t.rate) * float64(time.Second)))
+	until := t.next
+	t.mu.Unlock()
+	return sleep(ctx, time.Until(until))
+}
+
+// throttledReader limits a download to the client's bandwidth. It reads in
+// chunks of at most a quarter second of transfer, so the waits stay far
+// below the idle timeout of the download.
+type throttledReader struct {
+	r   io.Reader
+	t   *throttle
+	ctx context.Context
+}
+
+// Read implements io.Reader.
+func (tr *throttledReader) Read(p []byte) (int, error) {
+	if limit := int(max(tr.t.rate/4, 1024)); len(p) > limit {
+		p = p[:limit]
+	}
+	n, err := tr.r.Read(p)
+	if n > 0 {
+		if werr := tr.t.take(tr.ctx, n); werr != nil && err == nil {
+			err = werr
+		}
+	}
+	return n, err
+}
+
+// sleep waits for d or until ctx ends.
+func sleep(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

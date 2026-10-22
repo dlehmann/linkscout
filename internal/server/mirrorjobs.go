@@ -51,6 +51,15 @@ type JobView struct {
 	DelayMs     int             `json:"delayMs"`
 	Status      string          `json:"status"`
 	Progress    mirror.Progress `json:"progress"`
+
+	ExternalFiles  bool     `json:"externalFiles"`
+	Robots         bool     `json:"robots"`
+	Sitemap        bool     `json:"sitemap"`
+	Rules          []string `json:"rules,omitempty"`
+	Fresh          bool     `json:"fresh"`
+	RatePerHost    float64  `json:"ratePerHost,omitempty"`
+	BandwidthKiB   int64    `json:"bandwidthKiB,omitempty"`
+	MaxFileSizeMiB int64    `json:"maxFileSizeMiB,omitempty"`
 }
 
 // mirrorJobs is the list of offline copy jobs.
@@ -271,6 +280,15 @@ func (l *mirrorJobs) views() []JobView {
 			DelayMs:     int(j.cfg.Delay / time.Millisecond),
 			Status:      j.status(),
 			Progress:    j.runner.Progress(),
+
+			ExternalFiles:  j.cfg.ExternalFiles,
+			Robots:         j.cfg.Robots,
+			Sitemap:        j.cfg.Sitemap,
+			Rules:          j.cfg.Rules,
+			Fresh:          j.cfg.Fresh,
+			RatePerHost:    j.cfg.Fetch.RatePerHost,
+			BandwidthKiB:   j.cfg.Fetch.Bandwidth >> 10,
+			MaxFileSizeMiB: j.cfg.MaxFileSize >> 20,
 		})
 	}
 	return out

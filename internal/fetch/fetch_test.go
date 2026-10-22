@@ -402,3 +402,79 @@ func TestLastModified(t *testing.T) {
 		t.Errorf("broken LastModified = %v", r.LastModified)
 	}
 }
+
+func TestDownloadIf(t *testing.T) {
+	lm := time.Date(2026, 10, 21, 7, 28, 0, 0, time.UTC)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", `"v1"`)
+		// http.ServeContent answers If-None-Match / If-Modified-Since itself.
+		http.ServeContent(w, r, "a.txt", lm, strings.NewReader("hello"))
+	}))
+	defer srv.Close()
+	c := New(Options{})
+	var buf bytes.Buffer
+	r := c.DownloadIf(context.Background(), srv.URL, "", &buf, 0, Validators{})
+	if r.Status != 200 || r.ETag != `"v1"` || buf.String() != "hello" {
+		t.Fatalf("plain: %d %q %q", r.Status, r.ETag, buf.String())
+	}
+	for _, v := range []Validators{{ETag: `"v1"`}, {LastModified: lm}} {
+		buf.Reset()
+		if r := c.DownloadIf(context.Background(), srv.URL, "", &buf, 0, v); r.Status != 304 || buf.Len() != 0 {
+			t.Errorf("%+v: %d %q", v, r.Status, buf.String())
+		}
+	}
+	if r := c.DownloadIf(context.Background(), srv.URL, "", &buf, 0, Validators{ETag: `"old"`}); r.Status != 200 {
+		t.Errorf("changed ETag: %d", r.Status)
+	}
+}
+
+func TestRatePerHost(t *testing.T) {
+	var mu sync.Mutex
+	var times []time.Time
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		times = append(times, time.Now())
+		mu.Unlock()
+	}))
+	defer srv.Close()
+	c := New(Options{RatePerHost: 20}) // 50 ms apart
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c.Download(context.Background(), srv.URL, "", io.Discard, 0)
+		}()
+	}
+	wg.Wait()
+	if len(times) != 4 {
+		t.Fatalf("%d requests", len(times))
+	}
+	if d := times[3].Sub(times[0]); d < 140*time.Millisecond {
+		t.Errorf("4 requests at 20/s took %v", d)
+	}
+	// A cancelled wait returns at once.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if r := c.Get(ctx, srv.URL, "", false, 0); r.Err == nil {
+		t.Error("cancelled request succeeded")
+	}
+}
+
+func TestBandwidth(t *testing.T) {
+	body := strings.Repeat("x", 20<<10)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, body)
+	}))
+	defer srv.Close()
+	c := New(Options{Bandwidth: 64 << 10}) // 20 KiB at 64 KiB/s ≈ 310 ms
+	start := time.Now()
+	var buf bytes.Buffer
+	r := c.Download(context.Background(), srv.URL, "", &buf, 0)
+	if r.Err != nil || buf.Len() != len(body) {
+		t.Fatalf("download: %v, %d bytes", r.Err, buf.Len())
+	}
+	if d := time.Since(start); d < 250*time.Millisecond {
+		t.Errorf("20 KiB at 64 KiB/s took only %v", d)
+	}
+}

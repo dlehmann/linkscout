@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -341,6 +342,37 @@ func TestMirrorPunycode(t *testing.T) {
 	}
 }
 
+// The settings of the offline copy form reach the job; invalid rules are
+// rejected with a translated message.
+func TestMirrorOptions(t *testing.T) {
+	s, ui := newUI(t, i18n.DE)
+	base := t.TempDir()
+	resp, body := do(t, "POST", ui.URL+"/api/mirror/queue", MirrorRequest{URL: "https://example.com", OutDir: filepath.Join(base, "a")})
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("defaults: %d %s", resp.StatusCode, body)
+	}
+	no := false
+	resp, body = do(t, "POST", ui.URL+"/api/mirror/queue", MirrorRequest{URL: "https://example.com", OutDir: filepath.Join(base, "b"),
+		ExternalFiles: &no, Robots: true, Sitemap: &no, Rules: " -/private/*\n+*.pdf ", Fresh: true,
+		RatePerHost: 2.5, BandwidthKiB: 256, MaxFileSizeMiB: 10})
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("options: %d %s", resp.StatusCode, body)
+	}
+	jobs := s.mirrors.views()
+	if a := jobs[0]; !a.ExternalFiles || a.Robots || !a.Sitemap || a.Fresh || len(a.Rules) != 0 || a.RatePerHost != 0 {
+		t.Errorf("defaults = %+v", a)
+	}
+	b := jobs[1]
+	if b.ExternalFiles || !b.Robots || b.Sitemap || !b.Fresh || strings.Join(b.Rules, " ") != "-/private/* +*.pdf" ||
+		b.RatePerHost != 2.5 || b.BandwidthKiB != 256 || b.MaxFileSizeMiB != 10 {
+		t.Errorf("options = %+v", b)
+	}
+	resp, body = do(t, "POST", ui.URL+"/api/mirror/queue", MirrorRequest{URL: "https://example.com", OutDir: filepath.Join(base, "c"), Rules: "-ok private/*"})
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "Ungültige Regel private/*") {
+		t.Errorf("invalid rule: %d %s", resp.StatusCode, body)
+	}
+}
+
 func TestMirrorListStop(t *testing.T) {
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
@@ -520,7 +552,8 @@ func TestMirrorPasswordReuse(t *testing.T) {
 	waitIdle(t, s)
 	mu.Lock()
 	defer mu.Unlock()
-	if len(got) != 2 || got[0] != "s3cret" || got[1] != "s3cret" {
+	// Every request of both copies (pages, robots.txt, sitemap.xml) carries it.
+	if len(got) < 2 || slices.ContainsFunc(got, func(p string) bool { return p != "s3cret" }) {
 		t.Errorf("passwords sent: %q", got)
 	}
 }

@@ -67,6 +67,11 @@ type Defaults struct {
 	CheckExternal bool   `json:"checkExternal"`
 	MirrorBase    string `json:"mirrorBase"` // parent directory for offline copies
 	MirrorDir     string `json:"mirrorDir"`  // target directory template, see ExpandMirrorDir
+	// -rate, -bandwidth, -max-file-size: RatePerHost applies to every check
+	// and copy started from the UI, the others prefill the offline copy form.
+	RatePerHost    float64 `json:"ratePerHost"`
+	BandwidthKiB   int     `json:"bandwidthKiB"`
+	MaxFileSizeMiB int     `json:"maxFileSizeMiB"`
 }
 
 // Options configures the server.
@@ -308,6 +313,7 @@ func (s *Server) fetchOptions(referer, ua, user, pass string) fetch.Options {
 		Username:       user,
 		Password:       pass,
 		AcceptLanguage: i18n.AcceptLanguage(s.opts.Lang),
+		RatePerHost:    s.opts.Defaults.RatePerHost,
 	}
 }
 
@@ -389,7 +395,20 @@ type MirrorRequest struct {
 	Concurrency int    `json:"concurrency"`
 	MaxPages    int    `json:"maxPages"`
 	DelayMs     int    `json:"delayMs"`
+	// What belongs to the copy (nil = default true; Robots is off by
+	// default) and how fast it is loaded.
+	ExternalFiles  *bool   `json:"externalFiles"`
+	Robots         bool    `json:"robots"`
+	Sitemap        *bool   `json:"sitemap"`
+	Rules          string  `json:"rules"` // "+pattern -pattern …", see mirror.Rules
+	Fresh          bool    `json:"fresh"` // download everything again instead of updating
+	RatePerHost    float64 `json:"ratePerHost"`
+	BandwidthKiB   int     `json:"bandwidthKiB"`
+	MaxFileSizeMiB int     `json:"maxFileSizeMiB"`
 }
+
+// orTrue returns *b, or true when the field was left out.
+func orTrue(b *bool) bool { return b == nil || *b }
 
 // handleMirror adds an offline copy to the list and starts it.
 func (s *Server) handleMirror(w http.ResponseWriter, r *http.Request) {
@@ -415,6 +434,15 @@ func (s *Server) addMirror(w http.ResponseWriter, r *http.Request, start bool) {
 		s.fail(w, http.StatusBadRequest, errors.New(i18n.T(s.opts.Lang, "error.no_url")))
 		return
 	}
+	rules, err := mirror.ParseRules([]string{req.Rules})
+	if err != nil {
+		var re *mirror.RuleError
+		if errors.As(err, &re) {
+			err = fmt.Errorf(i18n.T(s.opts.Lang, "error.invalid_rule"), re.Rule)
+		}
+		s.fail(w, http.StatusBadRequest, err)
+		return
+	}
 	tpl := strings.TrimSpace(req.OutDir)
 	if tpl == "" {
 		tpl = s.opts.Defaults.MirrorDir
@@ -432,7 +460,16 @@ func (s *Server) addMirror(w http.ResponseWriter, r *http.Request, start bool) {
 		MaxPages:    max(req.MaxPages, 0),
 		Delay:       time.Duration(max(req.DelayMs, 0)) * time.Millisecond,
 		Fetch:       s.fetchOptions(req.Referer, req.UserAgent, req.Username, req.Password),
+
+		ExternalFiles: orTrue(req.ExternalFiles),
+		Robots:        req.Robots,
+		Sitemap:       orTrue(req.Sitemap),
+		Rules:         rules.Strings(),
+		Fresh:         req.Fresh,
+		MaxFileSize:   int64(max(req.MaxFileSizeMiB, 0)) << 20,
 	}
+	cfg.Fetch.RatePerHost = max(req.RatePerHost, 0)
+	cfg.Fetch.Bandwidth = int64(max(req.BandwidthKiB, 0)) << 10
 	job, err := s.mirrors.add(cfg, auto)
 	if errors.Is(err, errDirInUse) {
 		s.fail(w, http.StatusConflict, errors.New(i18n.T(s.opts.Lang, "error.dir_in_use")))

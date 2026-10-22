@@ -194,6 +194,25 @@
               <label><span data-i18n="form.max_pages"></span><input type="number" name="maxPages" min="0"></label>
               <label><span data-i18n="form.delay"></span><input type="number" name="delayMs" min="0" step="50"></label>
             </div>
+            <div class="subhead" data-i18n="mirror.scope"></div>
+            <div class="row">
+              <label class="check"><input type="checkbox" name="externalFiles"> <span data-i18n="mirror.external_files"></span></label>
+              <label class="check"><input type="checkbox" name="sitemap"> <span data-i18n="mirror.sitemap"></span></label>
+              <label class="check"><input type="checkbox" name="robots"> <span data-i18n="mirror.robots"></span></label>
+            </div>
+            <div class="row">
+              <label class="grow"><span data-i18n="mirror.rules"></span><input type="text" name="rules" spellcheck="false" autocomplete="off" data-i18n-placeholder="mirror.rules_placeholder"></label>
+            </div>
+            <div class="field-hint" data-i18n="mirror.rules_hint"></div>
+            <div class="subhead" data-i18n="mirror.speed"></div>
+            <div class="row">
+              <label><span data-i18n="mirror.rate"></span><input type="number" name="ratePerHost" min="0" step="0.5"></label>
+              <label><span data-i18n="mirror.bandwidth"></span><input type="number" name="bandwidthKiB" min="0" step="64"></label>
+              <label><span data-i18n="mirror.max_file_size"></span><input type="number" name="maxFileSizeMiB" min="0"></label>
+            </div>
+            <div class="row">
+              <label class="check"><input type="checkbox" name="fresh"> <span data-i18n="mirror.fresh"></span></label>
+            </div>
             <div class="subhead" data-i18n="form.auth"></div>
             <div class="row">
               <label class="grow"><span data-i18n="form.username"></span><input type="text" name="username" autocomplete="off" spellcheck="false"></label>

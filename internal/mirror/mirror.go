@@ -13,6 +13,10 @@
 //
 // Links to pages that were not downloaded stay absolute so they keep working
 // when the copy is opened in a browser.
+//
+// A second run into the same directory updates the copy and a stopped run
+// continues where it ended (see state.go); Rules, robots.txt and the sitemap
+// decide what belongs to the copy besides the linked pages.
 package mirror
 
 import (
@@ -38,6 +42,7 @@ import (
 
 	"github.com/dlehmann/linkscout/internal/fetch"
 	"github.com/dlehmann/linkscout/internal/links"
+	"github.com/dlehmann/linkscout/internal/robots"
 )
 
 // Config controls a mirror run.
@@ -50,14 +55,28 @@ type Config struct {
 	External    bool          `json:"external"`    // also download external embedded resources
 	Delay       time.Duration `json:"delay"`
 	MaxFileSize int64         `json:"maxFileSize"` // per file, 0 = 512 MiB
+	// ExternalFiles also downloads files (PDFs, images, archives …) that
+	// pages link to on other hosts; external pages are never downloaded.
+	ExternalFiles bool `json:"externalFiles"`
+	// Rules include or exclude URLs, see Rules.
+	Rules []string `json:"rules,omitempty"`
+	// Robots skips the URLs robots.txt disallows (the start URL is always
+	// downloaded).
+	Robots bool `json:"robots"`
+	// Sitemap also downloads the pages of the sitemap(s) that no link leads to.
+	Sitemap bool `json:"sitemap"`
+	// Fresh ignores the previous copy in OutDir and downloads everything.
+	Fresh bool `json:"fresh"`
 }
 
 // Progress describes the state of a mirror run.
 type Progress struct {
 	Running    bool      `json:"running"`
-	Done       int       `json:"done"`  // URLs processed
-	Total      int       `json:"total"` // URLs known
-	Files      int       `json:"files"` // files written
+	Done       int       `json:"done"`      // URLs processed
+	Total      int       `json:"total"`     // URLs known
+	Files      int       `json:"files"`     // files written
+	Unchanged  int       `json:"unchanged"` // reused from the previous copy (not modified / continued)
+	Removed    int       `json:"removed"`   // files of the previous copy that are no longer on the site
 	Bytes      int64     `json:"bytes"`
 	OutDir     string    `json:"outDir,omitempty"`
 	Error      string    `json:"error,omitempty"`
@@ -77,11 +96,14 @@ type Problem struct {
 	Status   int    `json:"status,omitempty"` // final HTTP status, 0 on transport errors
 	Error    string `json:"error,omitempty"`  // transport error
 	TooLarge bool   `json:"tooLarge,omitempty"`
+	Robots   bool   `json:"robots,omitempty"` // disallowed by robots.txt, not requested
+	Kept     bool   `json:"kept,omitempty"`   // failed, the version of the previous copy was kept
 	Saved    bool   `json:"saved"`
 }
 
 // tmpDirName is the directory inside the target directory where phase 1
-// stores the downloads; it is removed when the run ends.
+// stores the downloads; it is removed when the run is complete and kept when
+// it was interrupted, so the next run can continue (see state.go).
 const tmpDirName = ".linkscout-tmp"
 
 // entry is one URL of the mirror.
@@ -95,6 +117,11 @@ type entry struct {
 	ok       bool   // downloaded (also with a status other than 200)
 	final    string // URL after redirects; relative links in the file resolve against it
 	local    string // relative output path, set in phase 2
+	status   int
+	etag     string
+	lastMod  time.Time
+	guessed  bool // only found in JavaScript: errors are not reported
+	reused   bool // file of the previous copy or of an interrupted run
 }
 
 // run holds the state of a single mirror run.
@@ -103,6 +130,10 @@ type run struct {
 	start  *url.URL
 	client *fetch.Client
 	tmp    string
+	rules  Rules
+	robots *robots.Robots // nil unless Config.Robots
+	prev   map[string]*prevFile
+	old    *manifest // manifest of the previous copy, nil if there is none
 
 	mu      sync.Mutex
 	entries map[string]*entry // by normalised URL
@@ -131,16 +162,16 @@ func Run(ctx context.Context, cfg Config, notify func(Progress)) (Progress, erro
 	if cfg.MaxFileSize <= 0 {
 		cfg.MaxFileSize = 512 << 20
 	}
+	rules, err := ParseRules(cfg.Rules)
+	if err != nil {
+		return Progress{}, err
+	}
 	out, err := filepath.Abs(cfg.OutDir)
 	if err != nil {
 		return Progress{}, err
 	}
 	cfg.OutDir = out
 	tmp := filepath.Join(out, tmpDirName)
-	if err := os.MkdirAll(tmp, 0o755); err != nil {
-		return Progress{}, err
-	}
-	defer os.RemoveAll(tmp)
 
 	start, _ := url.Parse(norm)
 	cfg.Fetch.AuthHost = start.Host // never send credentials to CDNs
@@ -149,6 +180,7 @@ func Run(ctx context.Context, cfg Config, notify func(Progress)) (Progress, erro
 		start:   start,
 		client:  fetch.New(cfg.Fetch),
 		tmp:     tmp,
+		rules:   rules,
 		entries: map[string]*entry{},
 		aliases: map[string]*entry{},
 		sem:     make(chan struct{}, cfg.Concurrency),
@@ -158,18 +190,44 @@ func Run(ctx context.Context, cfg Config, notify func(Progress)) (Progress, erro
 	if r.notify == nil {
 		r.notify = func(Progress) {}
 	}
+	r.loadPrevious()
+	if err := os.MkdirAll(tmp, 0o755); err != nil {
+		return Progress{}, err
+	}
 
+	var rb *robots.Robots // also announces the sitemaps
+	if cfg.Robots || cfg.Sitemap {
+		rb = robots.Fetch(ctx, r.client, start)
+	}
+	if cfg.Robots {
+		r.robots = rb
+	}
 	r.mu.Lock()
-	r.add(ctx, norm, "", true)
+	r.add(ctx, norm, "", true, false)
 	r.mu.Unlock()
 	r.wg.Wait()
 
+	// Pages of the sitemap that no link leads to come after the linked ones,
+	// so MaxPages keeps the linked pages.
+	if cfg.Sitemap && ctx.Err() == nil {
+		urls := robots.SitemapURLs(ctx, r.client, start, rb)
+		r.mu.Lock()
+		for _, u := range urls {
+			r.add(ctx, u, "", true, false)
+		}
+		r.mu.Unlock()
+		r.wg.Wait()
+	}
+
 	if ctx.Err() != nil {
+		r.savePartial()
 		return r.finish(ctx.Err())
 	}
 	if err := r.write(); err != nil {
+		r.savePartial()
 		return r.finish(err)
 	}
+	os.RemoveAll(tmp)
 	return r.finish(nil)
 }
 
@@ -193,8 +251,9 @@ func (r *run) finish(err error) (Progress, error) {
 	return p, err
 }
 
-// add registers a URL and starts its download. r.mu must be held.
-func (r *run) add(ctx context.Context, u, source string, page bool) {
+// add registers a URL and starts its download. guessed marks URLs that were
+// only found in JavaScript. r.mu must be held.
+func (r *run) add(ctx context.Context, u, source string, page, guessed bool) {
 	// Internationalised host names are stored and requested in their ASCII
 	// form, so müller.de and xn--mller-kva.de are the same site and file.
 	u = links.ToASCII(u)
@@ -203,6 +262,9 @@ func (r *run) add(ctx context.Context, u, source string, page bool) {
 			// first seen as resource, now as page: nothing to do, the content
 			// type decides whether it gets parsed.
 			e.page = true
+		}
+		if !guessed {
+			e.guessed = false
 		}
 		return
 	}
@@ -214,8 +276,31 @@ func (r *run) add(ctx context.Context, u, source string, page bool) {
 		return
 	}
 	external := !links.SameSite(r.start, pu)
-	if external && (page || !r.cfg.External) {
-		return
+	if u != r.start.String() {
+		decided, include := r.rules.Match(pu)
+		switch {
+		case decided && !include:
+			return
+		case decided:
+			// included by a rule – external pages too (saved, not crawled)
+		case external && page:
+			// a link to another website: only its files, never its pages
+			if !r.cfg.ExternalFiles || !links.IsFile(links.Category(links.Extension(u))) {
+				return
+			}
+		case external && !r.cfg.External:
+			return
+		}
+		if !external && r.robots.Blocked(pu) {
+			// Recorded once (as an entry that is never downloaded) and listed.
+			r.entries[u] = &entry{url: u, page: page, guessed: guessed}
+			r.prog.Total = len(r.entries)
+			r.prog.Done++
+			if !guessed {
+				r.prog.Problems = append(r.prog.Problems, Problem{URL: u, Source: source, Robots: true})
+			}
+			return
+		}
 	}
 	// MaxPages limits the number of pages that are downloaded at all; files
 	// and resources of those pages are always included.
@@ -225,7 +310,7 @@ func (r *run) add(ctx context.Context, u, source string, page bool) {
 		}
 		r.pages++
 	}
-	e := &entry{url: u, external: external, page: page}
+	e := &entry{url: u, external: external, page: page, guessed: guessed}
 	r.entries[u] = e
 	r.order = append(r.order, e)
 	r.prog.Total = len(r.entries)
@@ -233,8 +318,8 @@ func (r *run) add(ctx context.Context, u, source string, page bool) {
 	go r.download(ctx, e, source)
 }
 
-// download fetches one entry into the temp directory and, for HTML and CSS,
-// queues the referenced URLs.
+// download fetches one entry into the temp directory and, for HTML, CSS and
+// JavaScript, queues the referenced URLs.
 func (r *run) download(ctx context.Context, e *entry, source string) {
 	defer r.wg.Done()
 	select {
@@ -252,33 +337,53 @@ func (r *run) download(ctx context.Context, e *entry, source string) {
 	}
 
 	tmpPath := filepath.Join(r.tmp, hash(e.url))
-	f, err := os.Create(tmpPath)
-	if err != nil {
-		r.done(e, 0)
-		return
+	prev := r.prev[e.url] // read-only after loadPrevious
+	var resp fetch.Response
+	reused := false
+	if prev != nil && prev.partial {
+		// Downloaded by an interrupted run moments ago: continue with it.
+		resp, reused = prev.response(""), true
+	} else {
+		f, err := os.Create(tmpPath)
+		if err != nil {
+			r.done(e, 0)
+			return
+		}
+		resp = r.client.DownloadIf(ctx, e.url, source, f, r.cfg.MaxFileSize, prev.validators())
+		f.Close()
+		if ctx.Err() != nil {
+			os.Remove(tmpPath)
+			r.done(e, 0) // stopped: not an error of the URL
+			return
+		}
+		if prev != nil && (resp.Status == 304 || temporaryFailure(resp)) && linkOrCopy(prev.src, tmpPath) == nil {
+			if resp.Status != 304 {
+				r.problem(e, Problem{URL: e.url, Source: source, Status: resp.Status, Error: errText(resp.Err), Kept: true, Saved: true})
+				resp.FinalURL = "" // the previous one
+			}
+			resp, reused = prev.response(resp.FinalURL), true
+		}
 	}
-	resp := r.client.Download(ctx, e.url, source, f, r.cfg.MaxFileSize)
-	f.Close()
 	// A file at the size limit was cut off: a broken copy is worse than the
 	// online link the page keeps instead. Pages with another status than
 	// 200 are kept when they have a body (custom error pages, sites that
 	// answer every page with 404) and listed as problems; the error body of
 	// an image, script or stylesheet would be no use as that file.
-	tooLarge := resp.Size >= r.cfg.MaxFileSize
+	tooLarge := !reused && resp.Size >= r.cfg.MaxFileSize
 	keepError := e.page && resp.Size > 0
 	if resp.Err != nil || tooLarge || resp.Status != 200 && !keepError {
 		os.Remove(tmpPath)
-		r.problem(e, source, resp, tooLarge, false)
+		r.problem(e, Problem{URL: e.url, Source: source, Status: resp.Status, Error: errText(resp.Err), TooLarge: tooLarge})
 		r.done(e, 0)
 		return
 	}
-	if resp.Status != 200 {
-		r.problem(e, source, resp, false, true)
+	if resp.Status != 200 { // also when continued: the copy has the error page
+		r.problem(e, Problem{URL: e.url, Source: source, Status: resp.Status, Saved: true})
 	}
 
 	r.mu.Lock()
 	e.tmp, e.ctype, e.ok = tmpPath, resp.ContentType, true
-	e.size = resp.Size
+	e.size, e.status, e.etag, e.lastMod, e.reused = resp.Size, resp.Status, resp.ETag, resp.LastModified, reused
 	e.final = resp.FinalURL
 	final, _ := url.Parse(resp.FinalURL)
 	if n, ok := links.Normalize(resp.FinalURL, nil); ok && n != e.url {
@@ -286,7 +391,8 @@ func (r *run) download(ctx context.Context, e *entry, source string) {
 			r.aliases[n] = e
 		}
 	}
-	parseHTML := links.IsHTML(e.ctype) && e.page && !e.external && final != nil && links.SameSite(r.start, final)
+	internal := !e.external && final != nil && links.SameSite(r.start, final)
+	parseHTML := links.IsHTML(e.ctype) && e.page && internal
 	r.mu.Unlock()
 
 	if final == nil {
@@ -299,7 +405,10 @@ func (r *run) download(ctx context.Context, e *entry, source string) {
 			doc := links.ParseHTML(body, final)
 			r.mu.Lock()
 			for _, l := range doc.Links {
-				r.add(ctx, l.URL, e.url, !l.Embedded)
+				r.add(ctx, l.URL, e.url, !l.Embedded, false)
+			}
+			for _, js := range inlineScripts(body) {
+				r.addGuessed(ctx, scriptURLs(js, true), final, e.url)
 			}
 			r.mu.Unlock()
 		}
@@ -309,23 +418,57 @@ func (r *run) download(ctx context.Context, e *entry, source string) {
 			r.mu.Lock()
 			for _, ref := range links.CSSURLs(string(body)) {
 				if abs, ok := links.Normalize(ref, final); ok {
-					r.add(ctx, abs, e.url, false)
+					r.add(ctx, abs, e.url, false, false)
 				}
 			}
+			r.mu.Unlock()
+		}
+	case isJS(e.ctype, e.url) && internal && resp.Size <= maxScriptSize:
+		body, err := os.ReadFile(tmpPath)
+		if err == nil {
+			r.mu.Lock()
+			r.addGuessed(ctx, scriptURLs(string(body), false), final, e.url)
 			r.mu.Unlock()
 		}
 	}
 	r.done(e, resp.Size)
 }
 
-// problem records a URL that did not answer with status 200.
-func (r *run) problem(e *entry, source string, resp fetch.Response, tooLarge, saved bool) {
-	p := Problem{URL: e.url, Source: source, Status: resp.Status, TooLarge: tooLarge, Saved: saved}
-	if resp.Err != nil {
-		p.Error = resp.Err.Error()
+// maxScriptSize limits the JavaScript files searched for URLs.
+const maxScriptSize = 5 << 20
+
+// addGuessed queues the URLs found in a script. Links to pages are queued as
+// pages (and parsed), everything else as resource. r.mu must be held.
+func (r *run) addGuessed(ctx context.Context, refs []string, base *url.URL, source string) {
+	for _, ref := range refs {
+		if abs, ok := links.Normalize(ref, base); ok {
+			r.add(ctx, abs, source, links.Category(links.Extension(abs)) == links.CatPage, true)
+		}
 	}
+}
+
+// temporaryFailure reports whether a failed download is probably a passing
+// problem (then the file of the previous copy is kept): no connection, a
+// server error or "too many requests".
+func temporaryFailure(resp fetch.Response) bool {
+	return resp.Err != nil || resp.Status >= 500 || resp.Status == 429 || resp.Status == 408
+}
+
+// errText returns the message of err or "".
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+// problem records a URL that did not answer with status 200 – unless it was
+// only guessed from JavaScript.
+func (r *run) problem(e *entry, p Problem) {
 	r.mu.Lock()
-	r.prog.Problems = append(r.prog.Problems, p)
+	if !e.guessed {
+		r.prog.Problems = append(r.prog.Problems, p)
+	}
 	r.mu.Unlock()
 }
 
@@ -335,6 +478,9 @@ func (r *run) done(e *entry, size int64) {
 	r.prog.Done++
 	if size > 0 {
 		r.prog.Bytes += size
+	}
+	if e.reused {
+		r.prog.Unchanged++
 	}
 	p := *r.prog
 	r.mu.Unlock()
@@ -368,6 +514,9 @@ func (r *run) write() error {
 	for _, e := range ok {
 		u, _ := url.Parse(e.url)
 		p := LocalPathIn(u, e.ctype, e.external, base)
+		if first, _, _ := strings.Cut(strings.ToLower(p), "/"); first == stateDirName || first == tmpDirName {
+			p = "_" + p // never write into LinkScout's own directories
+		}
 		if other, taken := used[strings.ToLower(p)]; taken && other != e.url {
 			p = withSuffix(p, "_"+hash(e.url)[:8])
 		}
@@ -410,6 +559,9 @@ func (r *run) write() error {
 		default:
 			err = moveFile(e.tmp, dst)
 		}
+		if err == nil && needsOriginal(e.ctype, e.url) {
+			err = r.keepOriginal(e) // for the next update
+		}
 		if err != nil {
 			return fmt.Errorf("%s: %w", e.url, err)
 		}
@@ -419,7 +571,11 @@ func (r *run) write() error {
 		r.mu.Unlock()
 		r.notify(p)
 	}
-	return nil
+	removed, err := r.finishState(ok)
+	r.mu.Lock()
+	r.prog.Removed = removed
+	r.mu.Unlock()
+	return err
 }
 
 // rewriteFile reads the downloaded file of e, transforms it with fn and
@@ -429,6 +585,9 @@ func (r *run) rewriteFile(e *entry, dst string, fn func([]byte) []byte) error {
 	if err != nil {
 		return err
 	}
+	// A new file instead of overwriting: the old one may be a hard link of
+	// a reused download (see linkOrCopy).
+	os.Remove(dst)
 	return os.WriteFile(dst, fn(b), 0o644)
 }
 
@@ -579,6 +738,15 @@ func contains(list []string, s string) bool {
 // or by extension when the server sent none).
 func isCSS(ctype, u string) bool {
 	return ctype == "text/css" || (ctype == "" && links.Extension(u) == "css")
+}
+
+// isJS reports whether a downloaded file is JavaScript.
+func isJS(ctype, u string) bool {
+	if strings.Contains(ctype, "javascript") || ctype == "text/ecmascript" {
+		return true
+	}
+	ext := links.Extension(u)
+	return (ctype == "" || ctype == "text/plain" || ctype == "application/octet-stream") && (ext == "js" || ext == "mjs")
 }
 
 // LocalPath maps a URL to a relative, slash separated file path inside the
@@ -776,7 +944,8 @@ func ZipDir(dir string, w io.Writer) error {
 			return err
 		}
 		if d.IsDir() {
-			if d.Name() == tmpDirName {
+			// LinkScout's own data is not part of the copy.
+			if p != dir && (d.Name() == tmpDirName || d.Name() == stateDirName) {
 				return filepath.SkipDir
 			}
 			return nil

@@ -24,6 +24,7 @@ import (
 
 	"github.com/dlehmann/linkscout/internal/fetch"
 	"github.com/dlehmann/linkscout/internal/links"
+	"github.com/dlehmann/linkscout/internal/robots"
 )
 
 // Kinds of results.
@@ -138,7 +139,7 @@ type Crawler struct {
 	sem      chan struct{}
 	ctx      context.Context
 	visited  map[string]bool // URLs processed in the current run
-	robots   *Robots         // rules of the site's robots.txt (loaded by Start)
+	robots   *robots.Robots  // rules of the site's robots.txt (loaded by Start)
 }
 
 // New creates an idle crawler.
@@ -176,10 +177,10 @@ func (c *Crawler) Start(cfg Config) error {
 	c.wg.Add(1)
 	go func(ctx context.Context, client *fetch.Client) {
 		defer c.wg.Done()
-		robots := fetchRobots(ctx, client, start)
+		rules := robots.Fetch(ctx, client, start)
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		c.robots = robots
+		c.robots = rules
 		c.enqueueLocked(norm, 0, "")
 	}(c.ctx, c.client)
 	c.finishWhenIdle()
@@ -248,10 +249,10 @@ func (c *Crawler) finishWhenIdle() {
 		c.wg.Wait()
 		c.mu.Lock()
 		sitemap := c.cfg.Sitemap && c.progress.Mode == "all" && c.ctx.Err() == nil
-		ctx, client, start, robots := c.ctx, c.client, c.start, c.robots
+		ctx, client, start, rules := c.ctx, c.client, c.start, c.robots
 		c.mu.Unlock()
 		if sitemap {
-			urls := fetchSitemapURLs(ctx, client, start, robots)
+			urls := robots.SitemapURLs(ctx, client, start, rules)
 			c.mu.Lock()
 			for _, u := range urls {
 				if r, ok := c.results[u]; ok {

@@ -5,6 +5,31 @@ All notable changes to LinkScout. The format follows
 [Semantic Versioning](https://semver.org/). The release workflow uses the
 section of a version as release notes.
 
+## [Unreleased]
+
+### Added
+
+- **Save offline – update and continue**: downloading into a directory that
+  already holds a copy only fetches what changed (the server is asked with
+  ETag / Last-Modified) and removes the files that are no longer on the
+  site; files that fail temporarily keep their previous version. A stopped
+  download continues where it ended. The list buttons say "Update" and
+  "Continue"; "Download everything again" (`-mirror-fresh`) starts over.
+- **Save offline – what belongs to the copy**: files linked on other
+  websites (PDFs, images, archives; `-mirror-external-files`), the pages of
+  `sitemap.xml` that no link leads to, and files that JavaScript refers to
+  (`"/img/slide-2.jpg"`) are downloaded too; robots.txt can be respected
+  (off by default, `-mirror-robots`), blocked URLs are listed; rules include or
+  exclude URLs (`-/private/* -*.zip +cdn.example.com/*`, `-mirror-rules`).
+- **Limits**: requests per second per server (`-rate`, also for checks),
+  bandwidth (`-bandwidth`) and maximum file size (`-max-file-size`) of
+  offline copies, also in the advanced settings of the form.
+
+### Fixed
+
+- **Save offline**: stopping a download no longer lists the URLs that were
+  being loaded at that moment as errors.
+
 ## [1.4.0] - 2026-10-22
 
 ### Added
@@ -153,6 +178,7 @@ First public release.
 - English and German UI by system language
 - Static binaries for Linux (x86_64, arm64) and macOS (Apple Silicon)
 
+[Unreleased]: https://github.com/dlehmann/linkscout/compare/v1.4.0...HEAD
 [1.4.0]: https://github.com/dlehmann/linkscout/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/dlehmann/linkscout/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/dlehmann/linkscout/compare/v1.1.0...v1.2.0

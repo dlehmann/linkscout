@@ -92,6 +92,16 @@ the checked site.
   Pages with an error status are saved anyway when they have content; the
   download list marks such entries and lists the affected URLs. Host names
   with umlauts are converted to Punycode.
+  - **Update and continue:** downloading into an existing copy only fetches
+    what changed (ETag / Last-Modified), keeps the previous version of files
+    that fail temporarily and removes files that are no longer on the site;
+    a stopped download continues where it ended.
+  - **What belongs to the copy:** files linked on other websites (PDFs,
+    images, archives), the pages of `sitemap.xml` and URLs found in
+    JavaScript; optionally respects robots.txt; include/exclude rules such as
+    `-/private/* -*.zip +cdn.example.com/*`.
+  - **Gentle on the server:** requests per second per server, bandwidth and
+    maximum file size can be limited.
 - **English and German** UI, chosen from the system language (`LANG`,
   `LC_ALL`, … and the macOS language settings), English as fallback; more
   languages can be added with a single file (see [AGENTS.md](AGENTS.md)).
@@ -214,8 +224,11 @@ linkscout -recheck report.json
 # check again and compare with the earlier report
 linkscout -report new.json -compare report.json https://example.com
 
-# save an offline copy
+# save an offline copy – run it again later to update it
 linkscout -mirror ./example-offline https://example.com
+
+# … without the shop, with PDFs from other hosts, at most 2 requests per second
+linkscout -mirror ./example-offline -mirror-rules "-/shop/*" -mirror-external-files -rate 2 https://example.com
 ```
 
 Useful options (`linkscout -help` lists all of them):
@@ -230,9 +243,15 @@ Useful options (`linkscout -help` lists all of them):
 | `-timeout 20s` | timeout per request (for offline copies: time without new data) |
 | `-user NAME` / `-password PW` | HTTP authentication for protected sites (also `https://user:pw@example.com` or env `LINKSCOUT_PASSWORD`) |
 | `-no-external` | do not check external links |
-| `-no-sitemap` | do not check the URLs listed in sitemap.xml |
+| `-no-sitemap` | do not check (with `-mirror`: do not download) the URLs listed in sitemap.xml |
 | `-compare FILE` | compare the results with an earlier JSON report |
 | `-mirror-external` | with `-mirror`: also download CDN resources |
+| `-mirror-external-files` | with `-mirror`: also download files linked on other websites (PDFs, images, archives) |
+| `-mirror-rules "-/private/* +*.pdf"` | with `-mirror`: include (`+`) or exclude (`-`) URLs; `*` matches anything, patterns starting with `/` apply to the path |
+| `-mirror-robots` | with `-mirror`: do not download what robots.txt disallows |
+| `-mirror-fresh` | with `-mirror`: download everything again instead of updating the copy |
+| `-rate N` | at most N requests per second to each server (checks and offline copies) |
+| `-bandwidth KiB` / `-max-file-size MiB` | with `-mirror`: limit the download speed and the size of a single file |
 | `-listen ADDR` | address of the web UI (default `127.0.0.1:8088`) |
 | `-no-browser` | do not open the browser automatically |
 | `-lang en\|de` | override the language |

@@ -1,15 +1,9 @@
-package crawler
-
-// robots.txt and sitemap.xml support.
+// Package robots reads robots.txt files and sitemaps.
 //
-// LinkScout is the site owner's tool, so robots.txt does not stop the crawl:
-// blocked URLs are checked like every other URL and only marked
-// (Result.RobotsBlocked), because a page that is blocked for search engines
-// but linked or listed in the sitemap is worth knowing about.
-//
-// After the link crawl the URLs of the sitemap(s) are added. URLs that were
-// not reached through links get the depth -1 ("not linked") – the orphan
-// pages of the SEO checks.
+// The crawler only marks URLs blocked by robots.txt (LinkScout is the site
+// owner's tool) and adds the sitemap URLs after the link crawl; the offline
+// copy can respect robots.txt and also downloads the pages of the sitemap.
+package robots
 
 import (
 	"bytes"
@@ -47,9 +41,9 @@ type robotsRule struct {
 	re      *regexp.Regexp
 }
 
-// ParseRobots reads a robots.txt. Only the group for "*" is used: LinkScout
+// Parse reads a robots.txt. Only the group for "*" is used: LinkScout
 // does not have rules of its own, and search engines fall back to it too.
-func ParseRobots(body string) *Robots {
+func Parse(body string) *Robots {
 	r := &Robots{}
 	inStar, groupHasRules := false, false
 	for _, line := range strings.Split(body, "\n") {
@@ -125,16 +119,16 @@ func (r *Robots) Blocked(u *url.URL) bool {
 	return !allow
 }
 
-// fetchRobots loads /robots.txt of the start URL; a missing file means
+// Fetch loads /robots.txt of the start URL; a missing file means
 // "everything allowed".
-func fetchRobots(ctx context.Context, c *fetch.Client, start *url.URL) *Robots {
+func Fetch(ctx context.Context, c *fetch.Client, start *url.URL) *Robots {
 	u := start.Scheme + "://" + start.Host + "/robots.txt"
 	var buf bytes.Buffer
 	resp := c.Download(ctx, u, "", &buf, maxRobotsSize)
 	if resp.Err != nil || resp.Status != 200 {
 		return &Robots{}
 	}
-	return ParseRobots(buf.String())
+	return Parse(buf.String())
 }
 
 // sitemapXML covers both <urlset> and <sitemapindex> documents.
@@ -175,11 +169,14 @@ func ParseSitemap(body []byte) (pages, sitemaps []string) {
 	return pages, sitemaps
 }
 
-// fetchSitemapURLs collects the page URLs of all sitemaps of the site: the
+// SitemapURLs collects the page URLs of all sitemaps of the site: the
 // ones announced in robots.txt, otherwise /sitemap.xml. Sitemap indexes are
 // followed (at most maxSitemaps files); only URLs of the checked site count.
-func fetchSitemapURLs(ctx context.Context, c *fetch.Client, start *url.URL, robots *Robots) []string {
-	queue := append([]string(nil), robots.Sitemaps...)
+func SitemapURLs(ctx context.Context, c *fetch.Client, start *url.URL, robots *Robots) []string {
+	var queue []string
+	if robots != nil {
+		queue = append(queue, robots.Sitemaps...)
+	}
 	if len(queue) == 0 {
 		queue = []string{start.Scheme + "://" + start.Host + "/sitemap.xml"}
 	}

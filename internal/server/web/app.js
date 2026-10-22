@@ -186,6 +186,13 @@
     mform.concurrency.value = 4;
     mform.maxPages.value = 0;
     mform.delayMs.value = d.delayMs || 0;
+    mform.externalFiles.checked = mform.sitemap.checked = true;
+    mform.robots.checked = false; // the copy is the site owner's tool, like the check
+    mform.rules.value = "";
+    mform.ratePerHost.value = d.ratePerHost || 0;
+    mform.bandwidthKiB.value = d.bandwidthKiB || 0;
+    mform.maxFileSizeMiB.value = d.maxFileSizeMiB || 0;
+    mform.fresh.checked = false;
     $("#dir-placeholders").innerHTML = t("mirror.placeholders")
       .replace(/<(\w+)>/g, (m) => `<code>${esc(m)}</code>`); // translations contain no other markup
     renderDirPreview();
@@ -296,6 +303,14 @@
         concurrency: +f.concurrency.value || 4,
         maxPages: +f.maxPages.value || 0,
         delayMs: +f.delayMs.value || 0,
+        externalFiles: f.externalFiles.checked,
+        sitemap: f.sitemap.checked,
+        robots: f.robots.checked,
+        rules: f.rules.value.trim(),
+        fresh: f.fresh.checked,
+        ratePerHost: +f.ratePerHost.value || 0,
+        bandwidthKiB: +f.bandwidthKiB.value || 0,
+        maxFileSizeMiB: +f.maxFileSizeMiB.value || 0,
       });
       save("linkscout.mirror", { outDir: f.outDir.value.trim() });
       // Ready for the next website; all other settings stay.
@@ -1314,10 +1329,15 @@
     const m = j.progress || {};
     const st = j.status;
     const vars = { done: fmtNum(st === "running" ? m.done : m.files), bytes: fmtBytes(m.bytes), dir: j.outDir, error: m.error || "" };
+    // Update statistics on their own line (see .job .progress-text).
+    const update = [
+      m.unchanged ? t("mirror.unchanged", { count: fmtNum(m.unchanged) }) : "",
+      m.removed ? t("mirror.removed", { count: fmtNum(m.removed) }) : "",
+    ].filter(Boolean).join(" · ");
     const text = {
       queued: t("mirror.queued"),
       running: t("mirror.running", vars),
-      done: `${t("mirror.finished", vars)}\n${t("mirror.open_hint")}`, // own line, see .job .progress-text
+      done: [t("mirror.finished", vars), update, t("mirror.open_hint")].filter(Boolean).join("\n"),
       failed: t("mirror.failed", vars),
       stopped: t("mirror.stopped", vars),
     }[st] || "";
@@ -1327,11 +1347,20 @@
       `${t("mirror.s_pages")}: ${j.maxPages || t("mirror.unlimited")}`,
       `${t("mirror.s_delay")}: ${fmtMs(j.delayMs)}`,
       j.username && `${t("mirror.s_user")}: ${esc(j.username)}`,
+      j.ratePerHost && `${fmtNum(j.ratePerHost)} ${t("mirror.s_rate")}`,
+      j.bandwidthKiB && `${fmtNum(j.bandwidthKiB)} ${t("mirror.s_bandwidth")}`,
+      j.maxFileSizeMiB && `${t("mirror.s_max_size")}: ${fmtNum(j.maxFileSizeMiB)} MiB`,
+      j.rules?.length && `${t("mirror.s_rules")}: <span class="mono">${esc(j.rules.join(" "))}</span>`,
+      j.robots && t("mirror.s_robots"),
+      !j.sitemap && t("mirror.s_no_sitemap"),
+      !j.externalFiles && t("mirror.s_no_ext_files"),
+      j.fresh && t("mirror.s_fresh"),
     ].filter(Boolean).join(" · ");
     const btn = (action, label, cls = "") => `<button type="button" class="small ${cls}" data-action="${action}">${esc(t(label))}</button>`;
     const actions = [
       st === "running" ? btn("stop", "form.stop", "danger")
-        : btn("start", st === "queued" ? "mirror.start_one" : "mirror.restart"),
+        : btn("start", st === "queued" ? "mirror.start_one" // again: update a finished copy, continue a stopped one
+          : j.fresh ? "mirror.restart" : st === "done" ? "mirror.update" : "mirror.continue"),
       st === "done" ? btn("open", "mirror.open_dir") : "",
       st === "done" ? `<a class="button small" href="/api/mirror/zip?id=${j.id}" download>${esc(t("mirror.zip"))}</a>` : "",
       btn("remove", "mirror.remove", "ghost"),
@@ -1364,13 +1393,14 @@
     const probs = j.progress?.problems || [];
     if (!probs.length) return "";
     const items = probs.map((p) => {
-      const what = p.tooLarge ? t("mirror.problem_too_large") : p.error || `HTTP ${p.status}`;
-      const cls = p.status ? `s${Math.floor(p.status / 100)}xx` : "serror";
-      const saved = p.saved ? t("mirror.problem_saved") : t("mirror.problem_not_saved");
+      const what = p.robots ? t("mirror.problem_robots")
+        : p.tooLarge ? t("mirror.problem_too_large") : p.error || `HTTP ${p.status}`;
+      const cls = p.status ? `s${Math.floor(p.status / 100)}xx` : p.robots ? "spending" : "serror";
+      const saved = p.kept ? t("mirror.problem_kept") : p.saved ? t("mirror.problem_saved") : t("mirror.problem_not_saved");
       const src = p.source ? `<div class="problem-source">${esc(t("mirror.problem_source", { url: readableURL(p.source) }))}</div>` : "";
-      return `<li><div class="problem-head"><span class="badge ${cls}">${esc(p.status || "ERR")}</span>
+      return `<li><div class="problem-head"><span class="badge ${cls}">${esc(p.status || (p.robots ? "robots" : "ERR"))}</span>
         <a href="${esc(p.url)}" class="mono">${esc(readableURL(p.url))}</a></div>
-        <div class="problem-meta">${esc(what)} · <span class="${p.saved ? "saved" : "not-saved"}">${esc(saved)}</span></div>${src}</li>`;
+        <div class="problem-meta">${esc(what)}${p.robots ? "" : ` · <span class="${p.saved ? "saved" : "not-saved"}">${esc(saved)}</span>`}</div>${src}</li>`;
     }).join("");
     return `<details class="problems"${openProblems.has(j.id) ? " open" : ""}>
       <summary>${esc(t("mirror.problems", { count: fmtNum(probs.length) }))}</summary>
