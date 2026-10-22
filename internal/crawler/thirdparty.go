@@ -179,7 +179,7 @@ type ThirdPartyHost struct {
 // NewThirdParty computes the external services over all analysed pages;
 // nil when no page was analysed.
 func NewThirdParty(rs []Result) *ThirdPartyOverview {
-	o := &ThirdPartyOverview{}
+	o := &ThirdPartyOverview{Hosts: []ThirdPartyHost{}} // [] rather than null in JSON
 	type acc struct {
 		ThirdPartyHost
 		urls map[string]bool

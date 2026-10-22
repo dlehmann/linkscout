@@ -208,11 +208,17 @@ func Run(ctx context.Context, cfg Config, notify func(Progress)) (Progress, erro
 	r.wg.Wait()
 
 	// Pages of the sitemap that no link leads to come after the linked ones,
-	// so MaxPages keeps the linked pages.
+	// so MaxPages keeps the linked pages. Only those below the start
+	// directory: the sitemap of https://user.github.io/ lists every project
+	// site, a copy of https://user.github.io/edith/ wants only edith.
 	if cfg.Sitemap && ctx.Err() == nil {
 		urls := robots.SitemapURLs(ctx, r.client, start, rb)
+		base := BaseDir(start)
 		r.mu.Lock()
 		for _, u := range urls {
+			if pu, err := url.Parse(u); err != nil || !strings.HasPrefix(pu.Path, base) {
+				continue
+			}
 			r.add(ctx, u, "", true, false)
 		}
 		r.mu.Unlock()

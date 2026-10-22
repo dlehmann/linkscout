@@ -5,7 +5,7 @@ All notable changes to LinkScout. The format follows
 [Semantic Versioning](https://semver.org/). The release workflow uses the
 section of a version as release notes.
 
-## [Unreleased]
+## [1.5.0] - 2026-10-22
 
 ### Added
 
@@ -35,7 +35,7 @@ section of a version as release notes.
   "Continue"; "Download everything again" (`-mirror-fresh`) starts over.
 - **Save offline – what belongs to the copy**: files linked on other
   websites (PDFs, images, archives; `-mirror-external-files`), the pages of
-  `sitemap.xml` that no link leads to, and files that JavaScript refers to
+  `sitemap.xml` that no link leads to (below the start directory), and files that JavaScript refers to
   (`"/img/slide-2.jpg"`) are downloaded too; robots.txt can be respected
   (off by default, `-mirror-robots`), blocked URLs are listed; rules include or
   exclude URLs (`-/private/* -*.zip +cdn.example.com/*`, `-mirror-rules`).
@@ -205,7 +205,7 @@ First public release.
 - English and German UI by system language
 - Static binaries for Linux (x86_64, arm64) and macOS (Apple Silicon)
 
-[Unreleased]: https://github.com/dlehmann/linkscout/compare/v1.4.0...HEAD
+[1.5.0]: https://github.com/dlehmann/linkscout/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/dlehmann/linkscout/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/dlehmann/linkscout/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/dlehmann/linkscout/compare/v1.1.0...v1.2.0

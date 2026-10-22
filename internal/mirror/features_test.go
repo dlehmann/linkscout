@@ -223,6 +223,17 @@ func TestMirrorFeatures(t *testing.T) {
 	if _, err := Run(context.Background(), Config{StartURL: fs.URL, OutDir: dir3, Rules: []string{"*.png"}}, nil); err == nil {
 		t.Error("invalid rule accepted")
 	}
+
+	// A copy of a sub-directory (a project site) takes only the sitemap
+	// pages below it: /orphan is outside of /a/.
+	dir4 := t.TempDir()
+	if _, err := Run(context.Background(), Config{StartURL: fs.URL + "/a/", OutDir: dir4, Sitemap: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	read(t, dir4, "index.html")
+	if _, err := os.Stat(filepath.Join(dir4, "_site", "orphan")); err == nil {
+		t.Error("sitemap page outside of the start directory saved")
+	}
 }
 
 func TestMirrorUpdate(t *testing.T) {

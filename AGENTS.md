@@ -267,7 +267,8 @@ have to wait for SSH.
   `Robots` (off by default in UI and CLI, like the check ignores it; CLI
   `-mirror-robots`) skips URLs of the
   site that robots.txt ("*" group) disallows; they are listed as
-  `Problem.Robots`. `Sitemap` adds the sitemap pages after the link crawl
+  `Problem.Robots`. `Sitemap` adds the sitemap pages below `BaseDir` (a project site does
+  not get the whole host from its sitemap) after the link crawl
   (like the crawler; CLI `-no-sitemap`). Scripts are searched for quoted
   URLs/paths with a known extension (`mirror/scripts.go`; relative paths
   only in inline scripts, script files only when internal and ≤5 MiB);
